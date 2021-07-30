@@ -54,12 +54,11 @@ Future<void> main(List<String> arguments) async {
       ),
       buildArtifactManager: BuildArtifactManager(projectDirectory),
     );
-    final context = config.createContext()..callQuery(compile, Unit());
+    final queryResult = config.callQuery(compile, Unit());
 
-    final errors = context.reportedErrors;
-    if (errors.isNotEmpty) {
+    if (queryResult.second.isNotEmpty) {
       print("❌ Compilation didn't succeed due to the following errors:");
-      for (final error in errors) {
+      for (final error in queryResult.second) {
         print('• ${error.message}');
 
         if (error.location != null) print('  📍 Location: ${error.location}');

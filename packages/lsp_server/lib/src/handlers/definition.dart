@@ -27,7 +27,6 @@ class DefinitionHandler
     if (!isCandyDocument(params.textDocument.uri)) return success(const []);
 
     final resourceId = server.fileUriToResourceId(params.textDocument.uri);
-    final context = server.queryConfig.createContext();
 
     final astNodeResult =
         getAstNodeAtPosition(server, resourceId, params.position);
@@ -47,13 +46,14 @@ class DefinitionHandler
     final expressionHir = expressionHirOption.value;
 
     Result<List<LocationLink>, String> resolve(DeclarationId id) {
-      final declarationResult = context.callQuery(getDeclarationAst, id);
-      if (declarationResult is None) {
+      final declarationResult =
+          server.queryConfig.callQuery(getDeclarationAst, id);
+      if (declarationResult.second.isNotEmpty) {
         return Error(
-          'Error while resolving declaration ID $id: ${context.reportedErrors}',
+          'Error while resolving declaration ID $id: ${declarationResult.second}',
         );
       }
-      final declarationAst = declarationResult.value;
+      final declarationAst = declarationResult.first.value;
 
       return Ok([
         LocationLink(
@@ -67,24 +67,25 @@ class DefinitionHandler
 
     Result<List<LocationLink>, String> resolveLocal(DeclarationLocalId id) {
       final loweringResult =
-          context.callQuery(getBodyAstToHirIds, id.declarationId);
-      if (loweringResult is None) {
+          server.queryConfig.callQuery(getBodyAstToHirIds, id.declarationId);
+      if (loweringResult.second.isNotEmpty) {
         return Error(
-          'Error while getting body AST to HIR IDs of $id: ${context.reportedErrors}',
+          'Error while getting body AST to HIR IDs of $id: ${loweringResult.second}',
         );
       }
-      final astToHirIds = loweringResult.value.value;
+      final astToHirIds = loweringResult.first.value.value;
       final astId =
           astToHirIds.map.entries.firstWhere((it) => it.value == id).key;
 
       final definitionResourceId = id.declarationId.resourceId;
-      final fileAstResult = context.callQuery(getAst, definitionResourceId);
-      if (fileAstResult is None) {
+      final fileAstResult =
+          server.queryConfig.callQuery(getAst, definitionResourceId);
+      if (fileAstResult.second.isNotEmpty) {
         return Error(
-          'Error while retrieving file AST of $definitionResourceId: ${context.reportedErrors}',
+          'Error while retrieving file AST of $definitionResourceId: ${fileAstResult.second}',
         );
       }
-      final fileAst = fileAstResult.value;
+      final fileAst = fileAstResult.first.value;
 
       final astNode = ast.ExpressionFinderVisitor.find(fileAst, astId);
       if (astNode == null) {
@@ -109,14 +110,14 @@ class DefinitionHandler
       identifier: (it) => it.identifier.maybeMap(
         reflection: (it) => resolve(it.id),
         parameter: (param) {
-          final functionAstResult = context.callQuery(
-              getFunctionDeclarationAst, param.id.declarationId);
-          if (functionAstResult is None) {
+          final functionAstResult = server.queryConfig
+              .callQuery(getFunctionDeclarationAst, param.id.declarationId);
+          if (functionAstResult.second.isNotEmpty) {
             return Error(
-              'Error while getting function AST of ${param.id.declarationId}: ${context.reportedErrors}',
+              'Error while getting function AST of ${param.id.declarationId}: ${functionAstResult.second}',
             );
           }
-          final functionAst = functionAstResult.value;
+          final functionAst = functionAstResult.first.value;
 
           final parameterAst = functionAst.valueParameters
               .firstWhere((it) => it.name.name == param.name);

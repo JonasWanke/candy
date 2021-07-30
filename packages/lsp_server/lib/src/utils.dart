@@ -11,7 +11,7 @@ bool isCandyDocument(String uri) => uri.endsWith('.candy');
 
 extension PositionToOffset on Position {
   int toOffset(AnalysisServer server, ResourceId resourceId) {
-    final context = QueryContext(server.queryConfig.createContext());
+    final context = QueryContext(GlobalQueryContext(server.queryConfig));
     final source = server.resourceProvider.getContent(context, resourceId);
 
     final lineOffset = line == 0
@@ -23,7 +23,7 @@ extension PositionToOffset on Position {
 
 extension OffsetToPosition on int {
   Position toPosition(AnalysisServer server, ResourceId resourceId) {
-    final context = QueryContext(server.queryConfig.createContext());
+    final context = QueryContext(GlobalQueryContext(server.queryConfig));
     final source = server.resourceProvider.getContent(context, resourceId);
 
     var line = 0;
@@ -66,16 +66,15 @@ Result<ast.AstNode, String> getAstNodeAtPosition(
   ResourceId resourceId,
   Position position,
 ) {
-  final context = server.queryConfig.createContext();
-  final fileAst = context.callQuery(getAst, resourceId).valueOrNull;
-  if (fileAst == null) {
+  final fileAst = server.queryConfig.callQuery(getAst, resourceId);
+  if (fileAst.second.isNotEmpty) {
     return Error(
-      "Couldn't parse AST of `$resourceId`: ${context.reportedErrors}",
+      "Couldn't parse AST of `$resourceId`: ${fileAst.second}",
     );
   }
 
   final offset = position.toOffset(server, resourceId);
-  return Ok(NodeFinderVisitor.find(fileAst, offset));
+  return Ok(NodeFinderVisitor.find(fileAst.first.value, offset));
 }
 
 Result<Option<hir.Expression>, String> getExpressionHirAtPosition(
@@ -89,17 +88,16 @@ Result<Option<hir.Expression>, String> getExpressionHirAtPosition(
   if (astNode is! ast.Expression) return Ok(None());
   final expressionAst = astNode as ast.Expression;
 
-  final context = server.queryConfig.createContext();
-  final nodeHirResult = context.callQuery(
+  final nodeHirResult = server.queryConfig.callQuery(
     getExpressionFromAstId,
     Tuple2(resourceId, expressionAst.id),
   );
-  if (nodeHirResult is None) {
+  if (nodeHirResult.second.isNotEmpty) {
     return Error(
-      "Couldn't get HIR of expression ${expressionAst.id}: ${context.reportedErrors}",
+      "Couldn't get HIR of expression ${expressionAst.id}: ${nodeHirResult.second}",
     );
   }
-  final nodeHir = nodeHirResult.value;
+  final nodeHir = nodeHirResult.first.value;
   return Ok(nodeHir);
 }
 

@@ -56,18 +56,7 @@ class BuildCommandHandler extends CommandHandler<ExecuteCommandParams, Object> {
 
   @override
   Future<ErrorOr<void>> handle(List<dynamic> arguments) async {
-    final context = server.queryConfig.createContext()
-      ..callQuery(dart.compile, Unit());
-    if (context.reportedErrors.isNotEmpty) {
-      return error(
-        ErrorCodes.InternalError,
-        'Failed to build to Dart.',
-        context.reportedErrors.join(', '),
-      );
-    } else {
-      server.sendLogMessage('Build succeeded 🎉');
-    }
-    return success();
+    return _build(server) ?? success();
   }
 }
 
@@ -78,18 +67,33 @@ class RunCommandHandler extends CommandHandler<ExecuteCommandParams, Object> {
 
   @override
   Future<ErrorOr<void>> handle(List<dynamic> arguments) async {
-    final context = server.queryConfig.createContext()
-      ..callQuery(dart.compile, Unit());
-    final output = context.callQuery(dart.run, Unit());
-    if (context.reportedErrors.isNotEmpty) {
+    final buildResult = _build(server);
+    if (buildResult != null) return buildResult;
+
+    final result = server.queryConfig.callQuery(dart.run, Unit());
+    if (result.second.isNotEmpty) {
       return error(
         ErrorCodes.InternalError,
         'Failed to run Dart program.',
-        context.reportedErrors.join(', '),
+        result.second.join(', '),
       );
     } else {
-      server.sendLogMessage(output.value, MessageType.Log);
+      server.sendLogMessage(result.first.value, MessageType.Log);
     }
     return success();
   }
+}
+
+ErrorOr<T> _build<T>(AnalysisServer server) {
+  final result = server.queryConfig.callQuery(dart.compile, Unit());
+  if (result.second.isNotEmpty) {
+    return error(
+      ErrorCodes.InternalError,
+      'Failed to build to Dart.',
+      result.second.join(', '),
+    );
+  } else {
+    server.sendLogMessage('Build succeeded 🎉');
+  }
+  return null;
 }

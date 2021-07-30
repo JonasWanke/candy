@@ -23,10 +23,9 @@ class HoverHandler extends MessageHandler<TextDocumentPositionParams, Hover> {
     CancellationToken token,
   ) async {
     final resourceId = server.fileUriToResourceId(params.textDocument.uri);
-    final context = server.queryConfig.createContext();
 
-    final fileAst = context.callQuery(getAst, resourceId).valueOrNull;
-    if (fileAst == null) {
+    final fileAst = server.queryConfig.callQuery(getAst, resourceId);
+    if (fileAst.second.isNotEmpty) {
       return error(
         ErrorCodes.InternalError,
         "Couldn't parse AST of `$resourceId`.",

@@ -25,17 +25,17 @@ class FoldingHandler
     CancellationToken token,
   ) async {
     final resourceId = server.fileUriToResourceId(params.textDocument.uri);
-    final context = server.queryConfig.createContext();
 
-    final fileAst = context.callQuery(getAst, resourceId).valueOrNull;
-    if (fileAst == null) {
+    final fileAst = server.queryConfig.callQuery(getAst, resourceId);
+    if (fileAst.second.isNotEmpty) {
       return error(
         ErrorCodes.InternalError,
-        "Couldn't parse AST of `$resourceId`: ${context.reportedErrors}",
+        "Couldn't parse AST of `$resourceId`: ${fileAst.second}",
       );
     }
 
-    final foldingRanges = _FoldingAstVisitor.visit(server, resourceId, fileAst);
+    final foldingRanges =
+        _FoldingAstVisitor.visit(server, resourceId, fileAst.first.value);
     return success(foldingRanges);
   }
 }

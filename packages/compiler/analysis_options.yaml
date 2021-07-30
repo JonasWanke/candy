@@ -22,7 +22,7 @@ linter:
     avoid_types_on_closure_parameters: true
     camel_case_extensions: true
     camel_case_types: true
-    cascade_invocations: true
+    cascade_invocations: false
     comment_references: true
     constant_identifier_names: true
     flutter_style_todos: true

@@ -296,9 +296,8 @@ class AnalysisServer {
 
   Map<ResourceId, List<ReportedCompilerError>> _errors = {};
   void onFileChanged(ResourceId resourceId) {
-    final context = queryConfig.createContext()
-      ..callQuery(calculateFullHir, resourceId);
-    _updateErrors(context.reportedErrorsByResourceId);
+    final result = queryConfig.callQuery(calculateFullHir, resourceId);
+    _updateErrors(result.second.groupBy((e) => e.location?.resourceId));
     updateTypeLabels(this, resourceId);
   }
 

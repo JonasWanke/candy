@@ -12,16 +12,15 @@ void updateTypeLabels(
   AnalysisServer server,
   ResourceId resourceId,
 ) {
-  final context = server.queryConfig.createContext();
-  final labelsResult =
-      context.callQuery(_generateTypeLabels, Tuple2(server, resourceId));
-  if (labelsResult is None) {
+  final labelsResult = server.queryConfig
+      .callQuery(_generateTypeLabels, Tuple2(server, resourceId));
+  if (labelsResult.second.isNotEmpty) {
     server.sendLogMessage(
-      'Error computing type labels: ${context.reportedErrors}',
+      'Error computing type labels: ${labelsResult.second}',
     );
     return;
   }
-  final labels = labelsResult.value;
+  final labels = labelsResult.first.value;
 
   final params = PublishTypeLabelsParams(
     server.resourceIdToFileUri(resourceId),
