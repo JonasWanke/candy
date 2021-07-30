@@ -228,7 +228,9 @@ class QueryContext {
 
     try {
       final result = query.execute(this, key);
-      globalContext._reportResult(query.name, key, result);
+      if (!query.evaluateAlways) {
+        globalContext._reportResult(query.name, key, result);
+      }
       reportErrors();
       return RecordedQueryCall(
         name: query.name,
