@@ -1,4 +1,4 @@
-use super::{pure::PurenessInsights, OptimizeMir};
+use super::{inlining::InliningState, pure::PurenessInsights, OptimizeMir};
 use crate::{
     error::CompilerError,
     id::IdGenerator,
@@ -16,6 +16,7 @@ pub struct Context<'a> {
     pub visible: &'a mut VisibleExpressions,
     pub id_generator: &'a mut IdGenerator<Id>,
     pub pureness: &'a mut PurenessInsights,
+    pub inlining_state: InliningState,
 }
 
 pub struct CurrentExpression<'a> {

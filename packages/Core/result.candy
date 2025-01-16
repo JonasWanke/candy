@@ -77,8 +77,7 @@ and resultA resultB :=
   needs (is resultB)
   resultA | flatMap { value -> resultB }
 
-# TODO: find a better name
-also result okSideEffect :=
+inspect result okSideEffect :=
   needs (is result)
   needs (function.is1 okSideEffect)
   result %

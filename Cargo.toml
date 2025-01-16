@@ -12,6 +12,7 @@ members = [
     "compiler/vm",
     "compiler/vm/fuzz",
 ]
+default-members = ["compiler/cli"]
 
 [workspace.package]
 edition = "2021"

@@ -10,11 +10,11 @@ readBytes fileSystemFile path :=
   needs (text.is path)
 
   path | fileSystemFile.open
-  | result.also { file -> needs (function.is0 file) }
+  | result.inspect { file -> needs (function.is0 file) }
   | result.flatMap { file ->
     file | fileSystemFile.readToEnd | result.map { bytes -> [file, bytes] }
   }
-  | result.also { [bytes] ->
+  | result.inspect { [bytes] ->
     needs (list.is bytes)
     needs (bytes | iterator.fromList | iterator.all { byte -> int.isUnsignedByte byte })
   }
