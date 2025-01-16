@@ -294,27 +294,6 @@ mod test {
             closing_double_quote: DoubleQuote
             closing_single_quotes:
         "###);
-        // issue: https://github.com/candy-lang/candy/issues/1016
-        assert_rich_ir_snapshot!(text("\"\n    text\n\"", 0), @r###"
-        Remaining input: ""
-        Parsed: Text:
-          opening: TrailingWhitespace:
-            child: OpeningText:
-              opening_single_quotes:
-              opening_double_quote: DoubleQuote
-            whitespace:
-              Newline "\n"
-              Whitespace "  "
-              Whitespace "  "
-          parts:
-            TrailingWhitespace:
-              child: TextPart "text"
-              whitespace:
-                Newline "\n"
-          closing: ClosingText:
-            closing_double_quote: DoubleQuote
-            closing_single_quotes:
-        "###);
         // https://github.com/candy-lang/candy/issues/1016
         assert_rich_ir_snapshot!(text("\"\n  foo\n    bar\n\"", 0), @r###"
         Remaining input: ""
@@ -332,16 +311,34 @@ mod test {
               child: TextNewline "\n"
               whitespace:
                 Whitespace "  "
-                Whitespace "  "
             TrailingWhitespace:
-              child: TextPart "bar"
+              child: TextPart "  bar"
               whitespace:
                 Newline "\n"
           closing: ClosingText:
             closing_double_quote: DoubleQuote
             closing_single_quotes:
         "###);
-
+        // issue: https://github.com/candy-lang/candy/issues/1016
+        assert_rich_ir_snapshot!(text("\"\n    text\n\"", 0), @r###"
+        Remaining input: ""
+        Parsed: Text:
+          opening: TrailingWhitespace:
+            child: OpeningText:
+              opening_single_quotes:
+              opening_double_quote: DoubleQuote
+            whitespace:
+              Newline "\n"
+              Whitespace "  "
+          parts:
+            TrailingWhitespace:
+              child: TextPart "  text"
+              whitespace:
+                Newline "\n"
+          closing: ClosingText:
+            closing_double_quote: DoubleQuote
+            closing_single_quotes:
+        "###);
         assert_rich_ir_snapshot!(text("\"  foobar  \"", 0), @r###"
         Remaining input: ""
         Parsed: Text:
