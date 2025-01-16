@@ -19,59 +19,60 @@ use extension_trait::extension_trait;
 use itertools::Itertools;
 use traversal::dft_post_rev;
 
-#[derive(Clone, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct FormattingInfo {
     pub indentation: Indentation,
 
     // The fields below apply only for direct descendants.
     pub trailing_comma_condition: Option<TrailingCommaCondition>,
-    pub is_single_expression_in_assignment_body: bool,
+    pub supports_sandwich_like_formatting: bool,
 }
 impl FormattingInfo {
     pub const fn with_indent(&self) -> Self {
         Self {
             indentation: self.indentation.with_indent(),
             trailing_comma_condition: None,
-            is_single_expression_in_assignment_body: false,
+            supports_sandwich_like_formatting: false,
         }
     }
     pub const fn with_dedent(&self) -> Self {
         Self {
             indentation: self.indentation.with_dedent(),
             trailing_comma_condition: None,
-            is_single_expression_in_assignment_body: false,
+            supports_sandwich_like_formatting: false,
         }
     }
     pub const fn with_trailing_comma_condition(&self, condition: TrailingCommaCondition) -> Self {
         Self {
             indentation: self.indentation,
             trailing_comma_condition: Some(condition),
-            is_single_expression_in_assignment_body: false,
+            supports_sandwich_like_formatting: false,
         }
     }
-    pub const fn for_single_expression_in_assignment_body(&self) -> Self {
+    pub const fn with_sandwich_like_support(&self) -> Self {
         Self {
             indentation: self.indentation.with_indent(),
             trailing_comma_condition: None,
-            is_single_expression_in_assignment_body: true,
+            supports_sandwich_like_formatting: true,
         }
     }
-    pub fn resolve_for_expression_with_indented_lines(
+    pub fn resolve_for_sandwich_like(
         &self,
         previous_width: Width,
         first_line_extra_width: Width,
-    ) -> Self {
-        Self {
-            indentation: if self.is_single_expression_in_assignment_body
-                && previous_width.last_line_fits(self.indentation, first_line_extra_width)
-            {
+    ) -> (Self, bool) {
+        let uses_sandwich_like_multiline_formatting = self.supports_sandwich_like_formatting
+            && previous_width.last_line_fits(self.indentation, first_line_extra_width);
+        let info = Self {
+            indentation: if uses_sandwich_like_multiline_formatting {
                 self.indentation.with_dedent()
             } else {
                 self.indentation
             },
             trailing_comma_condition: None,
-            is_single_expression_in_assignment_body: false,
-        }
+            supports_sandwich_like_formatting: false,
+        };
+        (info, uses_sandwich_like_multiline_formatting)
     }
 }
 
@@ -87,6 +88,8 @@ pub fn format_csts<'a>(
     let mut formatted =
         FormattedCst::new(Width::default(), ExistingWhitespace::empty(fallback_offset));
     let mut expression_count = 0;
+    let mut is_sandwich_like_multiline_formatting = true;
+    let mut ends_with_sandwich_like_multiline_formatting = true;
     loop {
         let (new_whitespace, rest) = split_leading_whitespace(offset, csts);
         csts = rest;
@@ -118,6 +121,9 @@ pub fn format_csts<'a>(
         };
 
         formatted = format_cst(edits, previous_width + width, expression, info);
+        is_sandwich_like_multiline_formatting &= formatted.is_sandwich_like_multiline_formatting();
+        ends_with_sandwich_like_multiline_formatting &=
+            formatted.ends_with_sandwich_like_multiline_formatting();
         offset = formatted.whitespace.end_offset();
         expression_count += 1;
     }
@@ -127,7 +133,12 @@ pub fn format_csts<'a>(
         width = width.without_first_line_width();
     }
 
-    FormattedCst::new(width, formatted.whitespace)
+    FormattedCst::new_maybe_sandwich_like_multiline_formatting(
+        width,
+        expression_count == 1 && is_sandwich_like_multiline_formatting,
+        expression_count == 1 && ends_with_sandwich_like_multiline_formatting,
+        formatted.whitespace,
+    )
 }
 
 fn split_leading_whitespace(start_offset: Offset, csts: &[Cst]) -> (ExistingWhitespace, &[Cst]) {
@@ -268,10 +279,8 @@ pub fn format_cst<'a>(
             parts,
             closing,
         } => {
-            let info = info.resolve_for_expression_with_indented_lines(
-                previous_width,
-                SinglelineWidth::PARENTHESIS.into(),
-            );
+            let (info, uses_sandwich_like_multiline_formatting) = info
+                .resolve_for_sandwich_like(previous_width, SinglelineWidth::DOUBLE_QUOTE.into());
 
             let opening = format_cst(edits, previous_width, opening, &info);
             let closing = format_cst(
@@ -309,15 +318,17 @@ pub fn format_cst<'a>(
             return if total_parts_width.is_singleline()
                 && (quotes_width + total_parts_width).fits(info.indentation)
             {
-                FormattedCst::new(
+                FormattedCst::new_maybe_sandwich_like_multiline_formatting(
                     opening.into_empty_trailing(edits)
                         + first_parts_width
                         + last_part.into_empty_trailing(edits)
                         + closing_width,
+                    uses_sandwich_like_multiline_formatting,
+                    uses_sandwich_like_multiline_formatting,
                     whitespace,
                 )
             } else {
-                FormattedCst::new(
+                FormattedCst::new_maybe_sandwich_like_multiline_formatting(
                     opening.into_trailing(
                         edits,
                         TrailingWhitespace::Indentation(info.indentation.with_indent()),
@@ -327,6 +338,8 @@ pub fn format_cst<'a>(
                             TrailingWhitespace::Indentation(info.indentation),
                         )
                         + closing_width,
+                    uses_sandwich_like_multiline_formatting,
+                    uses_sandwich_like_multiline_formatting,
                     whitespace,
                 )
             };
@@ -370,7 +383,7 @@ pub fn format_cst<'a>(
             let left_min_width = left.min_width(info.indentation);
 
             // Right
-            let (right_width, whitespace) = {
+            let (ends_with_sandwich_like_multiline_formatting, right_width, whitespace) = {
                 let (right, right_parentheses) = ExistingParentheses::split_from(edits, right);
                 // Depending on the precedence of `right` and whether there's an opening parenthesis
                 // with a comment, we might be able to remove the parentheses. However, we won't insert
@@ -393,7 +406,9 @@ pub fn format_cst<'a>(
                     (width_for_right_side + bar_width, info.clone())
                 };
                 let right = format_cst(edits, previous_width_for_right, right, &info_for_right);
-                if right_needs_parentheses {
+                let ends_with_sandwich_like_multiline_formatting =
+                    right.ends_with_sandwich_like_multiline_formatting();
+                let (width, whitespace) = if right_needs_parentheses {
                     assert!(right_parentheses.is_some());
                     right_parentheses.into_some(
                         edits,
@@ -408,10 +423,20 @@ pub fn format_cst<'a>(
                 } else {
                     right_parentheses.into_none(edits, right)
                 }
-                .split()
+                .split();
+                (
+                    ends_with_sandwich_like_multiline_formatting,
+                    width,
+                    whitespace,
+                )
             };
 
-            let left_width = if let Some(right_first_line_width) = right_width.first_line_width()
+            let left_width = if (left_min_width + SinglelineWidth::SPACE + bar_width + right_width)
+                .fits(info.indentation)
+            {
+                left.into_trailing_with_space(edits)
+            } else if ends_with_sandwich_like_multiline_formatting
+                && let Some(right_first_line_width) = right_width.first_line_width()
                 && (left_min_width + SinglelineWidth::SPACE + bar_width + right_first_line_width)
                     .fits(info.indentation)
             {
@@ -445,6 +470,7 @@ pub fn format_cst<'a>(
             receiver,
             arguments,
         } => {
+            // Receiver
             let receiver =
                 format_receiver(edits, previous_width, receiver, info, ReceiverParent::Call);
             if arguments.is_empty() {
@@ -453,79 +479,64 @@ pub fn format_cst<'a>(
 
             // Arguments
             let previous_width_for_arguments = Width::multiline(None, info.indentation.width());
-            let last_argument_index = arguments.len() - 1;
-            let mut arguments = arguments
+            let (last_argument, arguments) = arguments.split_last().unwrap();
+            let arguments = arguments
                 .iter()
-                .enumerate()
-                .map(|(index, argument)| {
+                .map(|argument| {
+                    let (argument, parentheses) = ExistingParentheses::split_from(edits, argument);
                     Argument::new(
                         edits,
                         previous_width_for_arguments,
-                        argument,
                         &info.with_indent(),
-                        index == last_argument_index,
+                        argument,
+                        parentheses,
                     )
                 })
                 .collect_vec();
 
-            let min_width = receiver.min_width(info.indentation)
+            let last_argument = LastArgument::new(
+                edits,
+                previous_width_for_arguments,
+                &info.with_indent(),
+                last_argument,
+            );
+
+            let min_width_without_last_argument = receiver.min_width(info.indentation)
                 + arguments
                     .iter()
-                    .map(|it| SinglelineWidth::SPACE + it.min_singleline_width())
+                    .map(|it| SinglelineWidth::SPACE + it.min_singleline_width)
                     .sum::<Width>();
-            let (is_singleline, argument_info, trailing) =
-                if previous_width.last_line_fits(info.indentation, min_width) {
-                    (true, info.clone(), TrailingWhitespace::Space)
-                } else {
-                    (
-                        false,
-                        info.with_indent(),
-                        TrailingWhitespace::Indentation(info.indentation.with_indent()),
-                    )
-                };
+
+            let last_argument =
+                last_argument.format(edits, previous_width, info, min_width_without_last_argument);
+
+            let argument_info = last_argument.derived_call_info.argument_info(info);
+            let trailing = last_argument.derived_call_info.trailing(info.indentation);
 
             let width = receiver.into_trailing(edits, trailing);
-
-            let last_argument = arguments.pop().unwrap();
             let width = arguments.into_iter().fold(width, |old_width, argument| {
                 let argument = argument.format(
                     edits,
                     previous_width + old_width,
                     &argument_info,
-                    is_singleline,
+                    last_argument.derived_call_info.is_quasi_singleline,
                 );
-                let width = if is_singleline {
+                let width = if last_argument.derived_call_info.is_quasi_singleline {
                     argument.into_trailing_with_space(edits)
                 } else {
                     argument.into_trailing_with_indentation(edits, argument_info.indentation)
                 };
                 old_width + width
             });
-            let last_argument_is_sandwich_like = matches!(
-                &last_argument.argument,
-                MaybeSandwichLikeArgument::SandwichLike(_)
+
+            return FormattedCst::new_maybe_sandwich_like_multiline_formatting(
+                width + last_argument.width,
+                false,
+                last_argument
+                    .derived_call_info
+                    .ends_with_sandwich_like_multiline_formatting,
+                last_argument.whitespace,
             );
-            let info_for_last_argument =
-                if info.is_single_expression_in_assignment_body && is_singleline {
-                    argument_info.with_dedent()
-                } else {
-                    argument_info
-                };
-            let (last_argument_width, whitespace) = last_argument
-                .format(
-                    edits,
-                    previous_width + width,
-                    &info_for_last_argument,
-                    is_singleline,
-                )
-                .split();
-
-            let mut width = width + last_argument_width;
-            if !is_singleline && !last_argument_is_sandwich_like {
-                width = width.without_first_line_width();
-            }
-
-            return FormattedCst::new(width, whitespace);
         }
         CstKind::List {
             opening_parenthesis,
@@ -715,18 +726,18 @@ pub fn format_cst<'a>(
                     return FormattedCst::new(expression_width + percent_width, whitespace);
                 };
 
-            let case_info = info
-                .resolve_for_expression_with_indented_lines(
+            let (case_info, is_sandwich_like_multiline_formatting) = info
+                .resolve_for_sandwich_like(
                     previous_width,
                     expression_width + SinglelineWidth::PERCENT,
-                )
-                .with_indent();
+                );
+            let case_info = case_info.with_indent();
             let percent_width =
                 percent.into_trailing_with_indentation(edits, case_info.indentation);
 
             let (last_case_width, whitespace) =
                 format_cst(edits, previous_width_for_indented, last_case, &case_info).split();
-            return FormattedCst::new(
+            return FormattedCst::new_maybe_sandwich_like_multiline_formatting(
                 expression_width
                     + percent_width
                     + cases
@@ -737,6 +748,8 @@ pub fn format_cst<'a>(
                         })
                         .sum::<Width>()
                     + last_case_width,
+                is_sandwich_like_multiline_formatting,
+                is_sandwich_like_multiline_formatting,
                 whitespace,
             );
         }
@@ -784,10 +797,8 @@ pub fn format_cst<'a>(
             body,
             closing_curly_brace,
         } => {
-            let info = info.resolve_for_expression_with_indented_lines(
-                previous_width,
-                SinglelineWidth::PARENTHESIS.into(),
-            );
+            let (info, is_sandwich_like_multiline_formatting) =
+                info.resolve_for_sandwich_like(previous_width, SinglelineWidth::PARENTHESIS.into());
 
             let opening_curly_brace = format_cst(edits, previous_width, opening_curly_brace, &info);
 
@@ -936,11 +947,13 @@ pub fn format_cst<'a>(
                 })
                 .unwrap_or_default();
 
-            return FormattedCst::new(
+            return FormattedCst::new_maybe_sandwich_like_multiline_formatting(
                 opening_curly_brace.into_trailing(edits, opening_curly_brace_trailing)
                     + parameters_and_arrow_width
                     + body.into_trailing(edits, body_trailing)
                     + closing_curly_brace_width,
+                is_sandwich_like_multiline_formatting,
+                is_sandwich_like_multiline_formatting,
                 whitespace,
             );
         }
@@ -964,11 +977,11 @@ pub fn format_cst<'a>(
             let body_info = if body.len() == 1 {
                 // Avoid double indentation for bodies/items/entries in trailing functions/lists/
                 // structs.
-                info.for_single_expression_in_assignment_body()
+                info.with_sandwich_like_support()
             } else {
                 info.with_indent()
             };
-            let (body_width, body_whitespace) = format_csts(
+            let formatted_body = format_csts(
                 edits,
                 previous_width_for_assignment_sign
                     + assignment_sign.min_width(info.indentation)
@@ -976,8 +989,10 @@ pub fn format_cst<'a>(
                 body,
                 assignment_sign.whitespace.end_offset(),
                 &body_info,
-            )
-            .split();
+            );
+            let body_ends_with_sandwich_like_multiline_formatting =
+                formatted_body.ends_with_sandwich_like_multiline_formatting();
+            let (body_width, body_whitespace) = formatted_body.split();
             let body_whitespace_has_comments = body_whitespace.has_comments();
             let body_whitespace_width = body_whitespace.into_trailing_with_indentation(
                 edits,
@@ -1003,6 +1018,7 @@ pub fn format_cst<'a>(
                 TrailingWhitespace::Space
             } else if !contains_single_assignment
                 && !body_whitespace_has_comments
+                && body_ends_with_sandwich_like_multiline_formatting
                 && let Some(body_first_line_width) = body_width.first_line_width()
                 && left_width.last_line_fits(
                     info.indentation,
@@ -1065,7 +1081,8 @@ fn format_receiver<'a>(
 
 struct Argument<'a> {
     #[allow(clippy::struct_field_names)]
-    argument: MaybeSandwichLikeArgument<'a>,
+    argument: FormattedCst<'a>,
+    min_singleline_width: Width,
     precedence: Option<PrecedenceCategory>,
     parentheses: ExistingParentheses<'a>,
 }
@@ -1073,26 +1090,20 @@ impl<'a> Argument<'a> {
     fn new(
         edits: &mut TextEdits,
         previous_width: Width,
-        cst: &'a Cst,
         info: &FormattingInfo,
-        is_last: bool,
+        argument: &'a Cst,
+        parentheses: ExistingParentheses<'a>,
     ) -> Self {
-        let (argument, parentheses) = ExistingParentheses::split_from(edits, cst);
         let precedence = argument.precedence();
 
-        let argument = if parentheses.are_required_due_to_comments() {
+        let (argument, min_singleline_width) = if parentheses.are_required_due_to_comments() {
             let argument = format_cst(
                 edits,
                 previous_width,
                 argument,
                 &info.with_indent().with_indent(),
             );
-            MaybeSandwichLikeArgument::Other {
-                argument,
-                min_singleline_width: Width::multiline(None, None),
-            }
-        } else if is_last && argument.is_sandwich_like() {
-            MaybeSandwichLikeArgument::SandwichLike(argument)
+            (argument, Width::multiline(None, None))
         } else {
             let argument = format_cst(edits, previous_width, argument, info);
             let mut min_singleline_width = argument.min_width(info.indentation.with_indent());
@@ -1103,80 +1114,206 @@ impl<'a> Argument<'a> {
                 None if parentheses.is_some() => min_singleline_width += parentheses_width,
                 None => {}
             }
-            MaybeSandwichLikeArgument::Other {
-                argument,
-                min_singleline_width,
-            }
+            (argument, min_singleline_width)
         };
         Argument {
             argument,
+            min_singleline_width,
             precedence,
             parentheses,
         }
     }
 
-    /// Width of the opening parenthesis / bracket / curly brace
-    const SANDWICH_LIKE_MIN_SINGLELINE_WIDTH: SinglelineWidth = SinglelineWidth::PARENTHESIS;
-    fn min_singleline_width(&self) -> Width {
-        match &self.argument {
-            MaybeSandwichLikeArgument::SandwichLike(_) => {
-                Self::SANDWICH_LIKE_MIN_SINGLELINE_WIDTH.into()
-            }
-            MaybeSandwichLikeArgument::Other {
-                min_singleline_width,
-                ..
-            } => *min_singleline_width,
-        }
-    }
     fn format(
         self,
         edits: &mut TextEdits,
         previous_width: Width,
         info: &FormattingInfo,
-        is_singleline: bool,
+        is_quasi_singleline: bool,
     ) -> FormattedCst<'a> {
-        let argument = match self.argument {
-            MaybeSandwichLikeArgument::SandwichLike(it) => {
-                format_cst(edits, previous_width, it, info)
-            }
-            MaybeSandwichLikeArgument::Other { argument, .. } => argument,
-        };
-
         let are_parentheses_necessary_due_to_precedence = match self.precedence {
             Some(PrecedenceCategory::High) => false,
             Some(PrecedenceCategory::Low) | None => true,
         };
         if self.parentheses.is_some() {
             // We already have parentheses …
-            if is_singleline && are_parentheses_necessary_due_to_precedence
+            if is_quasi_singleline && are_parentheses_necessary_due_to_precedence
                 || self.parentheses.are_required_due_to_comments()
             {
                 // … and we actually need them.
                 self.parentheses
-                    .into_some(edits, previous_width, argument, info)
+                    .into_some(edits, previous_width, self.argument, info)
             } else {
                 // … but we don't need them.
-                self.parentheses.into_none(edits, argument)
+                self.parentheses.into_none(edits, self.argument)
             }
         } else {
             // We don't have parentheses …
-            if is_singleline && are_parentheses_necessary_due_to_precedence {
+            if is_quasi_singleline && are_parentheses_necessary_due_to_precedence {
                 // … but we need them.
                 self.parentheses
-                    .into_some(edits, previous_width, argument, info)
+                    .into_some(edits, previous_width, self.argument, info)
             } else {
                 // … and we don't need them.
-                self.parentheses.into_none(edits, argument)
+                self.parentheses.into_none(edits, self.argument)
             }
         }
     }
 }
-enum MaybeSandwichLikeArgument<'a> {
-    SandwichLike(&'a Cst),
-    Other {
-        argument: FormattedCst<'a>,
-        min_singleline_width: Width,
+#[must_use]
+enum LastArgument<'a> {
+    SandwichLike {
+        argument: &'a Cst,
+        parentheses: ExistingParentheses<'a>,
     },
+    Other(Argument<'a>),
+}
+/// Intermediate state of the last argument of a function call.
+///
+/// Represents a sandwich-like argument already formatted or a non-sandwich-like argument yet to be
+/// formatted.
+#[must_use]
+struct LastArgumentFormattedIfSandwichLike<'a> {
+    derived_call_info: LastArgumentDerivedCallInfo,
+    width: Width,
+    whitespace: ExistingWhitespace<'a>,
+}
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+struct LastArgumentDerivedCallInfo {
+    /// True if the call fits into a single line or the last argument is a sandwich-like and only
+    /// that argument continues onto following lines.
+    is_quasi_singleline: bool,
+
+    ends_with_sandwich_like_multiline_formatting: bool,
+}
+impl<'a> LastArgument<'a> {
+    fn new(
+        edits: &mut TextEdits,
+        previous_width: Width,
+        info: &FormattingInfo,
+        argument: &'a Cst,
+    ) -> Self {
+        let (argument, parentheses) = ExistingParentheses::split_from(edits, argument);
+        if !parentheses.are_required_due_to_comments() && argument.is_sandwich_like() {
+            assert_eq!(argument.precedence(), Some(PrecedenceCategory::High));
+            LastArgument::SandwichLike {
+                argument,
+                parentheses,
+            }
+        } else {
+            LastArgument::Other(Argument::new(
+                edits,
+                previous_width,
+                info,
+                argument,
+                parentheses,
+            ))
+        }
+    }
+
+    fn format(
+        self,
+        edits: &mut TextEdits,
+        previous_width: Width,
+        call_info: &FormattingInfo,
+        min_width_without_last_argument: Width,
+    ) -> LastArgumentFormattedIfSandwichLike<'a> {
+        match self {
+            LastArgument::SandwichLike {
+                argument,
+                parentheses,
+            } => {
+                let min_width_before_last_argument =
+                    min_width_without_last_argument + SinglelineWidth::SPACE;
+
+                let is_singleline_before_last_argument = previous_width
+                    .last_line_fits(call_info.indentation, min_width_before_last_argument);
+                let last_argument_info = if call_info.supports_sandwich_like_formatting {
+                    if is_singleline_before_last_argument {
+                        call_info.with_dedent().with_sandwich_like_support()
+                    } else {
+                        call_info.clone()
+                    }
+                } else if is_singleline_before_last_argument {
+                    call_info.with_sandwich_like_support()
+                } else {
+                    call_info.with_indent()
+                };
+                let argument = format_cst(
+                    edits,
+                    previous_width + min_width_before_last_argument,
+                    argument,
+                    &last_argument_info,
+                );
+                let is_sandwich_like_multiline_formatting =
+                    argument.is_sandwich_like_multiline_formatting();
+
+                let argument = parentheses.into_none(edits, argument);
+
+                let (width, whitespace) = argument.split();
+                LastArgumentFormattedIfSandwichLike {
+                    derived_call_info: LastArgumentDerivedCallInfo {
+                        // Can only be true if the rest fits into a single line.
+                        is_quasi_singleline: is_sandwich_like_multiline_formatting,
+                        ends_with_sandwich_like_multiline_formatting:
+                            is_sandwich_like_multiline_formatting,
+                    },
+                    width,
+                    whitespace,
+                }
+            }
+            LastArgument::Other(argument) => {
+                let derived_call_info = LastArgumentDerivedCallInfo {
+                    is_quasi_singleline: previous_width.last_line_fits(
+                        call_info.indentation,
+                        min_width_without_last_argument
+                            + SinglelineWidth::SPACE
+                            + argument.min_singleline_width,
+                    ),
+                    ends_with_sandwich_like_multiline_formatting: false,
+                };
+                let info = if call_info.supports_sandwich_like_formatting
+                    && derived_call_info.is_quasi_singleline
+                {
+                    derived_call_info.argument_info(call_info).with_dedent()
+                } else {
+                    derived_call_info.argument_info(call_info)
+                };
+                let (width, whitespace) = argument
+                    .format(
+                        edits,
+                        previous_width,
+                        &info,
+                        derived_call_info.is_quasi_singleline,
+                    )
+                    .split();
+
+                LastArgumentFormattedIfSandwichLike {
+                    derived_call_info,
+                    width,
+                    whitespace,
+                }
+            }
+        }
+    }
+}
+impl LastArgumentDerivedCallInfo {
+    #[must_use]
+    fn argument_info(self, call_info: &FormattingInfo) -> FormattingInfo {
+        if self.is_quasi_singleline {
+            call_info.clone()
+        } else {
+            call_info.with_indent()
+        }
+    }
+    #[must_use]
+    const fn trailing(self, indentation: Indentation) -> TrailingWhitespace {
+        if self.is_quasi_singleline {
+            TrailingWhitespace::Space
+        } else {
+            TrailingWhitespace::Indentation(indentation.with_indent())
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -1454,6 +1591,15 @@ mod test {
         test(
             "looooooooooooooooooooooooooooooooongReceiver | looooooooooooooooooooooooooooooooongFunction longArgument0 longArgument1 longArgument2 longArgument3",
             "looooooooooooooooooooooooooooooooongReceiver\n| looooooooooooooooooooooooooooooooongFunction\n  longArgument0\n  longArgument1\n  longArgument2\n  longArgument3\n",
+        );
+        // looooooooooooooooooooooooooooooooongReceiver | looooooooooooooooooooooooooooooooongFunction {
+        //   LooooooooooongTag
+        // }
+        // looooooooooooooooooooooooooooooooongReceiver
+        // | looooooooooooooooooooooooooooooooongFunction { LooooooooooongTag }
+        test(
+                       "looooooooooooooooooooooooooooooooongReceiver\n| looooooooooooooooooooooooooooooooongFunction { LooooooooooongTag }\n",
+            "looooooooooooooooooooooooooooooooongReceiver\n| looooooooooooooooooooooooooooooooongFunction { LooooooooooongTag }\n",
         );
         // foo
         // | looooooooooooooooooooooooooooooooooooooooongFunction0 looooooooooooooooooooooooooooongArgument0
@@ -1779,6 +1925,17 @@ mod test {
             "[foo: bar # abc\n  , baz]",
             "[\n  foo: bar, # abc\n  baz,\n]\n",
         );
+
+        // https://github.com/candy-lang/candy/issues/828
+        // More [
+        //   State: [
+        //     YieldedAfterLastMatch: True,
+        //   ]
+        // ]
+        test(
+            "More [\n  State: [\n    YieldedAfterLastMatch: True,\n  ]\n]",
+            "More [State: [YieldedAfterLastMatch: True]]\n",
+        );
     }
     #[test]
     fn test_struct_access() {
@@ -1980,7 +2137,7 @@ mod test {
         // foo = bar {
         //   baz
         //   blub
-        //
+        // }
         test(
             "foo = bar {\n  baz\n  blub\n}",
             "foo = bar {\n  baz\n  blub\n}\n",
@@ -1991,6 +2148,13 @@ mod test {
         test(
             "looooooooooooooooongIdentifier = function loooooooooooooooooooooooooooooooooooooooooooooooongArgument",
             "looooooooooooooooongIdentifier =\n  function\n    loooooooooooooooooooooooooooooooooooooooooooooooongArgument\n",
+        );
+        // looooooooooooooooongIdentifier = function loooooooooooooooooooooooooooongArgument {
+        //   LooooooooooongTag
+        // }
+        test(
+            "looooooooooooooooongIdentifier = function loooooooooooooooooooooooooooongArgument {\n  LooooooooooongTag\n}\n",
+            "looooooooooooooooongIdentifier = function loooooooooooooooooooooooooooongArgument {\n  LooooooooooongTag\n}\n",
         );
 
         // Function definition

@@ -425,7 +425,7 @@ impl<'a> ExistingWhitespace<'a> {
                         &FormattingInfo {
                             indentation,
                             trailing_comma_condition: None,
-                            is_single_expression_in_assignment_body: false,
+                            supports_sandwich_like_formatting: false,
                         },
                     )
                     .split();

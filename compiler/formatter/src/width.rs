@@ -37,6 +37,7 @@ pub struct SinglelineWidth(usize);
 impl SinglelineWidth {
     pub const SPACE: Self = Self(1);
     pub const PERCENT: Self = Self(1);
+    pub const DOUBLE_QUOTE: Self = Self(1);
 
     pub const fn new_const(width: usize) -> Self {
         Self(width)

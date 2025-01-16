@@ -71,6 +71,7 @@ pub fn struct_(input: &str, indentation: usize, allow_function: bool) -> Option<
 
         // Whitespace between colon and value.
         let (input, whitespace) = whitespaces_and_newlines(input, fields_indentation + 1, true);
+        let whitespace_is_multiline = whitespace.is_multiline();
         if whitespace.is_multiline() {
             fields_indentation = indentation + 1;
         }
@@ -79,7 +80,11 @@ pub fn struct_(input: &str, indentation: usize, allow_function: bool) -> Option<
         // Value.
         let (input, value, has_value) = match expression(
             input,
-            fields_indentation + 1,
+            if whitespace_is_multiline {
+                fields_indentation + 1
+            } else {
+                fields_indentation
+            },
             ExpressionParsingOptions {
                 allow_assignment: false,
                 allow_call: true,
@@ -220,8 +225,8 @@ mod test {
           fields:
             StructField:
               key_and_colon:
-              key: Identifier "foo"
-              colon: Colon
+                key: Identifier "foo"
+                colon: Colon
               value: Identifier "bar"
               comma: None
           closing_bracket: ClosingBracket
@@ -237,8 +242,8 @@ mod test {
               comma: Comma
             StructField:
               key_and_colon:
-              key: Identifier "bar"
-              colon: Colon
+                key: Identifier "bar"
+                colon: Colon
               value: Identifier "baz"
               comma: None
           closing_bracket: ClosingBracket
@@ -275,11 +280,11 @@ mod test {
             TrailingWhitespace:
               child: StructField:
                 key_and_colon:
-                key: Identifier "foo"
-                colon: TrailingWhitespace:
-                  child: Colon
-                  whitespace:
-                    Whitespace " "
+                  key: Identifier "foo"
+                  colon: TrailingWhitespace:
+                    child: Colon
+                    whitespace:
+                      Whitespace " "
                 value: Identifier "bar"
                 comma: Comma
               whitespace:
@@ -288,14 +293,14 @@ mod test {
             TrailingWhitespace:
               child: StructField:
                 key_and_colon:
-                key: Int:
-                  radix_prefix: None
-                  value: 4
-                  string: "4"
-                colon: TrailingWhitespace:
-                  child: Colon
-                  whitespace:
-                    Whitespace " "
+                  key: Int:
+                    radix_prefix: None
+                    value: 4
+                    string: "4"
+                  colon: TrailingWhitespace:
+                    child: Colon
+                    whitespace:
+                      Whitespace " "
                 value: Text:
                   opening: OpeningText:
                     opening_single_quotes:
@@ -310,5 +315,128 @@ mod test {
                 Newline "\n"
           closing_bracket: ClosingBracket
         "###);
+        // https://github.com/candy-lang/candy/issues/828
+        assert_rich_ir_snapshot!(
+            struct_(
+                "[\n  State: [YieldedAfterLastMatch: True]\n]",
+                0,
+                true
+            ),
+            @r###"
+        Remaining input: ""
+        Parsed: Struct:
+          opening_bracket: TrailingWhitespace:
+            child: OpeningBracket
+            whitespace:
+              Newline "\n"
+              Whitespace "  "
+          fields:
+            TrailingWhitespace:
+              child: StructField:
+                key_and_colon:
+                  key: Symbol "State"
+                  colon: TrailingWhitespace:
+                    child: Colon
+                    whitespace:
+                      Whitespace " "
+                value: Struct:
+                  opening_bracket: OpeningBracket
+                  fields:
+                    StructField:
+                      key_and_colon:
+                        key: Symbol "YieldedAfterLastMatch"
+                        colon: TrailingWhitespace:
+                          child: Colon
+                          whitespace:
+                            Whitespace " "
+                      value: Symbol "True"
+                      comma: None
+                  closing_bracket: ClosingBracket
+                comma: None
+              whitespace:
+                Newline "\n"
+          closing_bracket: ClosingBracket
+        "###
+        );
+        assert_rich_ir_snapshot!(
+            struct_(
+                "[\n  YieldedAfterLastMatch: True,\n]",
+                0,
+                true
+            ),
+            @r###"
+        Remaining input: ""
+        Parsed: Struct:
+          opening_bracket: TrailingWhitespace:
+            child: OpeningBracket
+            whitespace:
+              Newline "\n"
+              Whitespace "  "
+          fields:
+            TrailingWhitespace:
+              child: StructField:
+                key_and_colon:
+                  key: Symbol "YieldedAfterLastMatch"
+                  colon: TrailingWhitespace:
+                    child: Colon
+                    whitespace:
+                      Whitespace " "
+                value: Symbol "True"
+                comma: Comma
+              whitespace:
+                Newline "\n"
+          closing_bracket: ClosingBracket
+        "###
+        );
+        assert_rich_ir_snapshot!(
+            struct_(
+                "[\n  State: [\n    YieldedAfterLastMatch: True,\n  ]\n]",
+                0,
+                true
+            ),
+            @r###"
+        Remaining input: ""
+        Parsed: Struct:
+          opening_bracket: TrailingWhitespace:
+            child: OpeningBracket
+            whitespace:
+              Newline "\n"
+              Whitespace "  "
+          fields:
+            TrailingWhitespace:
+              child: StructField:
+                key_and_colon:
+                  key: Symbol "State"
+                  colon: TrailingWhitespace:
+                    child: Colon
+                    whitespace:
+                      Whitespace " "
+                value: Struct:
+                  opening_bracket: TrailingWhitespace:
+                    child: OpeningBracket
+                    whitespace:
+                      Newline "\n"
+                      Whitespace "    "
+                  fields:
+                    TrailingWhitespace:
+                      child: StructField:
+                        key_and_colon:
+                          key: Symbol "YieldedAfterLastMatch"
+                          colon: TrailingWhitespace:
+                            child: Colon
+                            whitespace:
+                              Whitespace " "
+                        value: Symbol "True"
+                        comma: Comma
+                      whitespace:
+                        Newline "\n"
+                        Whitespace "  "
+                  closing_bracket: ClosingBracket
+                comma: None
+              whitespace:
+                Newline "\n"
+          closing_bracket: ClosingBracket
+        "###
+        );
     }
 }

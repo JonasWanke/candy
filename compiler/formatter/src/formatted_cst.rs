@@ -22,12 +22,42 @@ pub struct FormattedCst<'a> {
     /// If there are trailing comments, this is [Width::Multiline]. Otherwise, it's the child's own
     /// width.
     child_width: Width,
+
+    /// Whether this CST node was formatted as a multiline sandwich-like.
+    ///
+    /// This means the previous width had sufficient space to fit the sandwich-like's opening
+    /// character(s) (e.g., the opening parenthesis of a function call or the opening quote(s) of a
+    /// text) and the rest of the sandwich-like expression is formatted over multiple lines.
+    is_sandwich_like_multiline_formatting: bool,
+
+    /// Whether this CST node is mostly singleline and ends with a CST node formatted as a multiline
+    /// sandwich-like.
+    ///
+    /// For example, if the single expression of an assignment is a call with a trailing multiline
+    /// list argument, it can start on the same line as the assignment but end on a new line.
+    ends_with_sandwich_like_multiline_formatting: bool,
+
     pub whitespace: ExistingWhitespace<'a>,
 }
 impl<'a> FormattedCst<'a> {
     pub const fn new(child_width: Width, whitespace: ExistingWhitespace<'a>) -> Self {
         Self {
             child_width,
+            is_sandwich_like_multiline_formatting: false,
+            ends_with_sandwich_like_multiline_formatting: false,
+            whitespace,
+        }
+    }
+    pub const fn new_maybe_sandwich_like_multiline_formatting(
+        child_width: Width,
+        is_sandwich_like_multiline_formatting: bool,
+        ends_with_sandwich_like_multiline_formatting: bool,
+        whitespace: ExistingWhitespace<'a>,
+    ) -> Self {
+        Self {
+            child_width,
+            is_sandwich_like_multiline_formatting,
+            ends_with_sandwich_like_multiline_formatting,
             whitespace,
         }
     }
@@ -43,6 +73,15 @@ impl<'a> FormattedCst<'a> {
         } else {
             self.child_width
         }
+    }
+
+    #[must_use]
+    pub const fn is_sandwich_like_multiline_formatting(&self) -> bool {
+        self.is_sandwich_like_multiline_formatting
+    }
+    #[must_use]
+    pub const fn ends_with_sandwich_like_multiline_formatting(&self) -> bool {
+        self.ends_with_sandwich_like_multiline_formatting
     }
 
     pub fn split(self) -> (Width, ExistingWhitespace<'a>) {

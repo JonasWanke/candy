@@ -859,8 +859,10 @@ where
                 builder.push_cst_kind("StructField", |builder| {
                     builder.push_cst_kind_property_name("key_and_colon");
                     if let Some(box (key, colon)) = key_and_colon {
-                        builder.push_cst_kind_property("key", key);
-                        builder.push_cst_kind_property("colon", colon);
+                        builder.push_indented_foldable(|builder| {
+                            builder.push_cst_kind_property("key", key);
+                            builder.push_cst_kind_property("colon", colon);
+                        });
                     } else {
                         builder.push_simple(" None");
                     }
