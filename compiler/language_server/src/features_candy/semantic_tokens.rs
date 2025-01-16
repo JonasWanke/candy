@@ -236,10 +236,15 @@ fn visit_cst(
         }
         CstKind::MatchCase {
             pattern,
+            condition,
             arrow,
             body,
         } => {
             visit_cst(builder, pattern, None);
+            if let Some(box (comma, condition)) = condition {
+                visit_cst(builder, comma, None);
+                visit_cst(builder, condition, None);
+            }
             visit_cst(builder, arrow, None);
             visit_csts(builder, body, None);
         }

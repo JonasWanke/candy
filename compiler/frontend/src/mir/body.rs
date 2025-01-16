@@ -412,7 +412,50 @@ impl BodyBuilder {
             responsible,
         )
     }
+    pub fn push_if_not(
+        &mut self,
+        hir_id: &hir::Id,
+        condition: Id,
+        else_builder: impl FnOnce(&mut Self),
+        responsible: Id,
+    ) -> Id {
+        self.push_if_else(
+            hir_id,
+            condition,
+            |body| {
+                body.push_nothing();
+            },
+            else_builder,
+            responsible,
+        )
+    }
+    pub fn push_is_bool(&mut self, hir_id: &hir::Id, value: Id, responsible: Id) -> Id {
+        let is_value_true = self.push_equals_value(value, true, responsible);
+        self.push_if_else(
+            &hir_id.child("isValueTrue"),
+            is_value_true,
+            |body| {
+                body.push_reference(is_value_true);
+            },
+            |body| {
+                body.push_equals_value(value, false, responsible);
+            },
+            responsible,
+        )
+    }
+    pub fn push_equals(&mut self, a: Id, b: Id, responsible: Id) -> Id {
+        let builtin_equals = self.push_builtin(BuiltinFunction::Equals);
+        self.push_call(builtin_equals, vec![a, b], responsible)
+    }
+    pub fn push_equals_value(&mut self, a: Id, b: impl Into<Expression>, responsible: Id) -> Id {
+        let b = self.push(b.into());
+        self.push_equals(a, b, responsible)
+    }
 
+    pub fn push_to_debug_text(&mut self, value: Id, responsible: Id) -> Id {
+        let builtin_to_debug_text = self.push_builtin(BuiltinFunction::ToDebugText);
+        self.push_call(builtin_to_debug_text, vec![value], responsible)
+    }
     pub fn push_panic(&mut self, reason: Id, responsible: Id) -> Id {
         self.push(Expression::Panic {
             reason,
@@ -437,6 +480,19 @@ impl BodyBuilder {
             },
             responsible,
         )
+    }
+
+    pub fn push_text_concatenate(&mut self, parts: &[Id], responsible: Id) -> Id {
+        assert!(!parts.is_empty());
+
+        let builtin_text_concatenate = self.push_builtin(BuiltinFunction::TextConcatenate);
+        parts
+            .iter()
+            .copied()
+            .reduce(|left, right| {
+                self.push_call(builtin_text_concatenate, vec![left, right], responsible)
+            })
+            .unwrap()
     }
 
     #[must_use]

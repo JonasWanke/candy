@@ -257,10 +257,12 @@ impl Rcst {
             },
             CstKind::MatchCase {
                 pattern,
+                condition,
                 arrow,
                 body,
             } => CstKind::MatchCase {
                 pattern: Box::new(pattern.to_cst(state)),
+                condition: condition.as_ref().map(|v| Box::new(v.to_cst(state))),
                 arrow: Box::new(arrow.to_cst(state)),
                 body: body.to_csts_helper(state),
             },
@@ -332,5 +334,12 @@ impl RcstsToCstsHelperExt for Vec<Rcst> {
             csts.push(rcst.to_cst(state));
         }
         csts
+    }
+}
+
+#[extension_trait]
+impl ConvertToCst for (Rcst, Rcst) {
+    fn to_cst(&self, state: &mut State) -> (Cst, Cst) {
+        (self.0.to_cst(state), self.1.to_cst(state))
     }
 }

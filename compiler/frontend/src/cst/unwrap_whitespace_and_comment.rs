@@ -144,10 +144,17 @@ impl<D: Clone> UnwrapWhitespaceAndComment for Cst<D> {
             },
             CstKind::MatchCase {
                 pattern,
+                condition,
                 arrow,
                 body,
             } => CstKind::MatchCase {
                 pattern: pattern.unwrap_whitespace_and_comment(),
+                condition: condition.as_deref().map(|(comma, condition)| {
+                    Box::new((
+                        comma.unwrap_whitespace_and_comment(),
+                        condition.unwrap_whitespace_and_comment(),
+                    ))
+                }),
                 arrow: arrow.unwrap_whitespace_and_comment(),
                 body: body.unwrap_whitespace_and_comment(),
             },

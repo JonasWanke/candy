@@ -8,6 +8,7 @@ pub enum CstError {
     ListNotClosed,
     MatchCaseMissesArrow,
     MatchCaseMissesBody,
+    MatchCaseMissesCondition,
     MatchMissesCases,
     OpeningParenthesisMissesExpression,
     OrPatternMissesRight,

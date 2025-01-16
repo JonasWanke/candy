@@ -91,7 +91,7 @@ impl<T: ToRichIr> ToRichIr for Option<(&str, T)> {
 }
 
 #[cfg(test)]
-macro_rules! assert_rich_ir_snapshot {
+macro_rules!  assert_rich_ir_snapshot {
     ($value:expr, @$string:literal) => {
         insta::_assert_snapshot_base!(
             transform=|it| $crate::rich_ir::ToRichIr::to_rich_ir(it, false).text,

@@ -1,0 +1,18 @@
+[ifElse, int] = use "Core"
+
+buildEnum value =
+  needs (int.is value)
+  ifElse (value | int.isLessThan 10) { Ok value } { Error "NOPE" }
+
+testFunction value =
+  needs (int.is value)
+  buildEnum value %
+    Ok value, value | int.isLessThan 2 -> value
+    Ok value, value | int.isGreaterThan 3 -> int.multiply value 2
+    Error value -> 10
+    _ -> 20
+
+
+main := { args ->
+  (testFunction 1, testFunction 2, testFunction 3, testFunction 4, testFunction 40)
+}
