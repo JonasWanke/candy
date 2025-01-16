@@ -15,7 +15,7 @@ pub fn function(input: &str, indentation: usize) -> Option<(&str, Rcst)> {
     let (input, opening_curly_brace) = opening_curly_brace(input)?;
     let (input, mut opening_curly_brace, mut parameters_and_arrow) = {
         let input_without_params = input;
-        let opening_curly_brace_wihout_params = opening_curly_brace.clone();
+        let opening_curly_brace_without_params = opening_curly_brace.clone();
 
         let mut input = input;
         let mut opening_curly_brace = opening_curly_brace;
@@ -50,7 +50,7 @@ pub fn function(input: &str, indentation: usize) -> Option<(&str, Rcst)> {
             Some((input, arrow)) => (input, opening_curly_brace, Some((parameters, arrow))),
             None => (
                 input_without_params,
-                opening_curly_brace_wihout_params,
+                opening_curly_brace_without_params,
                 None,
             ),
         }

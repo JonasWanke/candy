@@ -328,7 +328,7 @@ fn expression_suffix_assignment<'a>(
     let just_the_assignment_sign = assignment_sign.clone();
     let input_after_assignment_sign = input;
 
-    let (input, more_whitespace) = whitespaces_and_newlines(input, indentation + 1, false);
+    let (input, more_whitespace) = whitespaces_and_newlines(input, indentation + 1, true);
     assignment_sign = assignment_sign.wrap_in_whitespace(more_whitespace);
 
     let is_multiline = left.is_multiline() || assignment_sign.is_multiline();
