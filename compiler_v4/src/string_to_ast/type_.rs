@@ -93,7 +93,7 @@ fn function_type_parameter_type<'a>(
 }
 
 #[instrument(level = "trace")]
-pub fn type_arguments<'s>(parser: Parser<'s>) -> Option<(Parser, AstTypeArguments)> {
+pub fn type_arguments<'s>(parser: Parser<'s>) -> Option<(Parser<'s>, AstTypeArguments)> {
     let start_offset = parser.offset();
     let mut parser = opening_bracket(parser)?.and_trailing_whitespace();
 

@@ -96,7 +96,7 @@ impl ToText for Mono {
 
         builder.push("Assignments (in initialization order):");
         builder.push_newline();
-        for name in self.assignment_initialization_order.iter() {
+        for name in &self.assignment_initialization_order {
             (&**name, &self.assignments[name]).build_text(builder);
             builder.push_newline();
         }
@@ -264,7 +264,7 @@ impl Body {
                 }
                 ExpressionKind::Switch { value, cases, .. } => {
                     referenced_ids.insert(*value);
-                    for case in cases.iter() {
+                    for case in &**cases {
                         if let Some((value_id, _)) = &case.value {
                             referenced_ids.insert(*value_id);
                         }

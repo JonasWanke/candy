@@ -17,16 +17,16 @@ impl InstructionPointer {
     }
 }
 impl Step for InstructionPointer {
-    fn steps_between(start: &Self, end: &Self) -> Option<usize> {
-        (**end).checked_sub(**start)
+    fn steps_between(start: &Self, end: &Self) -> (usize, Option<usize>) {
+        usize::steps_between(&**start, &**end)
     }
 
     fn forward_checked(start: Self, count: usize) -> Option<Self> {
-        (*start).checked_add(count).map(Self)
+        usize::forward_checked(*start, count).map(InstructionPointer)
     }
 
     fn backward_checked(start: Self, count: usize) -> Option<Self> {
-        (*start).checked_sub(count).map(Self)
+        usize::backward_checked(*start, count).map(InstructionPointer)
     }
 }
 impl Debug for InstructionPointer {

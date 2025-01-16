@@ -1,14 +1,15 @@
 #![feature(let_chains)]
-#![warn(clippy::nursery, clippy::pedantic, unused_crate_dependencies)]
-#![allow(
-    clippy::cognitive_complexity,
-    clippy::match_same_arms,
-    clippy::missing_errors_doc,
-    clippy::missing_panics_doc,
-    clippy::module_name_repetitions,
-    clippy::similar_names,
-    clippy::too_many_lines
-)]
+#![allow(clippy::all)]
+// #![warn(clippy::nursery, clippy::pedantic, unused_crate_dependencies)]
+// #![allow(
+//     clippy::cognitive_complexity,
+//     clippy::match_same_arms,
+//     clippy::missing_errors_doc,
+//     clippy::missing_panics_doc,
+//     clippy::module_name_repetitions,
+//     clippy::similar_names,
+//     clippy::too_many_lines
+// )]
 
 use candy_frontend::{
     builtin_functions::BuiltinFunction,

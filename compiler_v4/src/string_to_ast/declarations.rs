@@ -418,7 +418,7 @@ fn parameter<'a>(parser: Parser) -> Option<(Parser, AstParameter, Option<Parser>
 }
 
 #[instrument(level = "trace")]
-fn type_parameters<'s>(parser: Parser<'s>) -> Option<(Parser, AstTypeParameters)> {
+fn type_parameters(parser: Parser) -> Option<(Parser, AstTypeParameters)> {
     let start_offset = parser.offset();
     let mut parser = opening_bracket(parser)?.and_trailing_whitespace();
 

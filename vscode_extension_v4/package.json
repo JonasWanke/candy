@@ -9,7 +9,6 @@
     "url": "https://github.com/candy-lang/candy.git",
     "directory": "vscode_extension_v4"
   },
-  "//": "Keep in sync with `devDependencies.@types/vscode`",
   "//": "https://github.com/ewanharris/vscode-versions",
   "engines": {
     "node": "^18.17.1",
@@ -23,6 +22,17 @@
   ],
   "main": "./out/extension.js",
   "contributes": {
+    "configuration": {
+      "title": "🍭 Candy",
+      "properties": {
+        "candy.compilerExecutablePath": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Path to the 🍭 Candy compiler executable. If empty, we'll attempt to find the 🍭 Candy executable in the `PATH` environment variable.",
+          "scope": "machine-overridable"
+        }
+      }
+    },
     "configurationDefaults": {
       "[candy]": {
         "editor.detectIndentation": false,
@@ -58,7 +68,9 @@
     "lint": "eslint --ext ts .",
     "watch": "tsc -watch -p ./"
   },
-  "dependencies": {},
+  "dependencies": {
+    "linebyline": "^1.3.0"
+  },
   "devDependencies": {
     "@types/node": "^20.11.20",
     "@types/vscode": "^1.86.0",

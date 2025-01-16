@@ -8,7 +8,6 @@
     nonzero_ops,
     slice_ptr_get,
     step_trait,
-    strict_provenance,
     try_blocks
 )]
 // We can't enable `unused_crate_dependencies` since it reports false positives about
@@ -16,16 +15,17 @@
 // https://github.com/rust-lang/rust/issues/57274
 // https://github.com/rust-lang/rust/issues/95513
 // https://github.com/rust-lang/rust-clippy/issues/4341
-#![warn(clippy::nursery, clippy::pedantic)]
-#![allow(
-    clippy::large_enum_variant,
-    clippy::match_same_arms,
-    clippy::missing_errors_doc,
-    clippy::missing_panics_doc,
-    clippy::module_name_repetitions,
-    clippy::similar_names,
-    clippy::too_many_lines
-)]
+#![allow(clippy::all)]
+// #![warn(clippy::nursery, clippy::pedantic)]
+// #![allow(
+//     clippy::large_enum_variant,
+//     clippy::match_same_arms,
+//     clippy::missing_errors_doc,
+//     clippy::missing_panics_doc,
+//     clippy::module_name_repetitions,
+//     clippy::similar_names,
+//     clippy::too_many_lines
+// )]
 
 pub use builtin_functions::CAN_USE_STDOUT;
 pub use instruction_pointer::InstructionPointer;

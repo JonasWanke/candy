@@ -53,7 +53,7 @@ pub fn expression(parser: Parser) -> Option<(Parser, AstExpression)> {
             result: &mut AstExpression,
             parse: fn(Parser<'a>, &mut AstExpression) -> Option<Parser<'a>>,
         ) -> bool {
-            parse(*parser, result).map_or(false, |new_parser| {
+            parse(*parser, result).is_some_and(|new_parser| {
                 *parser = new_parser;
                 true
             })
@@ -290,7 +290,7 @@ fn expression_suffix_call<'s>(
     Some(parser)
 }
 #[instrument(level = "trace")]
-fn arguments<'s>(parser: Parser<'s>) -> Option<(Parser, AstArguments)> {
+fn arguments<'s>(parser: Parser<'s>) -> Option<(Parser<'s>, AstArguments)> {
     let opening_parenthesis_start = parser.offset();
     let mut parser = opening_parenthesis(parser)?.and_trailing_whitespace();
     let opening_parenthesis_span = opening_parenthesis_start..parser.offset();
