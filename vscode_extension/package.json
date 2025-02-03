@@ -257,7 +257,7 @@
     "eslint-config-prettier": "^9.1.0",
     "eslint-plugin-prettier": "^5.2.1",
     "glob": "^10.3.10",
-    "mocha": "^10.8.2",
+    "mocha": "^11.1.0",
     "prettier": "^3.4.2",
     "typescript": "^5.4.5",
     "vscode-test": "^1.4.0"
