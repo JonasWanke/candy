@@ -141,7 +141,6 @@ pub fn whitespaces_and_newlines(
             new_parts.push(newline);
             is_sufficiently_indented = false;
         }
-
         if let Some((new_new_input, whitespace)) = leading_indentation(new_input, indentation) {
             new_input = new_new_input;
             new_parts.push(whitespace);
@@ -149,7 +148,8 @@ pub fn whitespaces_and_newlines(
             input = new_input;
             parts.append(&mut new_parts);
             is_sufficiently_indented = true;
-        } else if let Some((new_new_input, whitespace)) = single_line_whitespace(new_input) {
+        }
+        if let Some((new_new_input, whitespace)) = single_line_whitespace(new_input) {
             new_input = new_new_input;
             new_parts.push(whitespace);
         }
@@ -231,16 +231,18 @@ mod test {
         assert_rich_ir_snapshot!(
             whitespaces_and_newlines("\n  foo", 0, true),
             @r###"
-        Remaining input: "  foo"
+        Remaining input: "foo"
         Parsed: Newline "\n"
+        Whitespace "  "
         "###
         );
         assert_rich_ir_snapshot!(
             whitespaces_and_newlines(" \n  foo", 0, true),
             @r###"
-        Remaining input: "  foo"
+        Remaining input: "foo"
         Parsed: Whitespace " "
         Newline "\n"
+        Whitespace "  "
         "###
         );
         assert_rich_ir_snapshot!(
