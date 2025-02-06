@@ -1462,11 +1462,11 @@ mod test {
               fields:
                 StructField:
                   key_and_colon:
-                  key: Symbol "Foo"
-                  colon: TrailingWhitespace:
-                    child: Colon
-                    whitespace:
-                      Whitespace " "
+                    key: Symbol "Foo"
+                    colon: TrailingWhitespace:
+                      child: Colon
+                      whitespace:
+                        Whitespace " "
                   value: Identifier "foo"
                   comma: None
               closing_bracket: ClosingBracket

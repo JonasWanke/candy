@@ -17,10 +17,8 @@ pub fn format_collection<'a>(
     is_comma_required_for_single_item: bool,
     info: &FormattingInfo,
 ) -> FormattedCst<'a> {
-    let info = info.resolve_for_expression_with_indented_lines(
-        previous_width,
-        SinglelineWidth::PARENTHESIS.into(),
-    );
+    let (info, uses_sandwich_like_multiline_formatting) =
+        info.resolve_for_sandwich_like(previous_width, SinglelineWidth::PARENTHESIS.into());
 
     let opening_punctuation = format_cst(edits, previous_width, opening_punctuation, &info);
     let closing_punctuation = format_cst(
@@ -100,7 +98,7 @@ pub fn format_collection<'a>(
 
     let last_item_index = items.len().checked_sub(1);
     let (closing_punctuation_width, whitespace) = closing_punctuation.split();
-    FormattedCst::new(
+    FormattedCst::new_maybe_sandwich_like_multiline_formatting(
         opening_punctuation.into_trailing(edits, opening_punctuation_trailing)
             + items
                 .into_iter()
@@ -117,6 +115,8 @@ pub fn format_collection<'a>(
                 })
                 .sum::<Width>()
             + closing_punctuation_width,
+        uses_sandwich_like_multiline_formatting,
+        uses_sandwich_like_multiline_formatting,
         whitespace,
     )
 }
