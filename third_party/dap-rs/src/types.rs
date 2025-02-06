@@ -1156,7 +1156,7 @@ fromstr_deser! { VariablesArgumentsFilter }
 tostr_ser! { VariablesArgumentsFilter }
 
 /// Properties of a breakpoint location returned from the breakpointLocations request.
-
+///
 /// Specfication: [BreakpointLocation](https://microsoft.github.io/debug-adapter-protocol/specification#Types_BreakpointLocation)
 #[derive(Serialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]

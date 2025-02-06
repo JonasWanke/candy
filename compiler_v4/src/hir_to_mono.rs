@@ -358,7 +358,7 @@ impl<'h> Context<'h> {
                 result.push_str(&type_.name);
                 if !type_.type_arguments.is_empty() {
                     result.push_str("$of$");
-                    for type_ in type_.type_arguments.iter() {
+                    for type_ in &type_.type_arguments {
                         Self::mangle_type_helper(result, type_);
                         result.push('$');
                     }
@@ -375,7 +375,7 @@ impl<'h> Context<'h> {
                 result.push_str("$Fun$");
                 if !type_.parameter_types.is_empty() {
                     result.push_str("of$");
-                    for type_ in type_.parameter_types.iter() {
+                    for type_ in &type_.parameter_types {
                         Self::mangle_type_helper(result, type_);
                         result.push('$');
                     }
@@ -427,7 +427,7 @@ impl<'c, 'h> BodyBuilder<'c, 'h> {
             id_generator: IdGenerator::default(),
             id_mapping: FxHashMap::default(),
         };
-        builder.id_mapping = self.id_mapping.clone();
+        builder.id_mapping.clone_from(&self.id_mapping);
         builder.id_generator = mem::take(&mut self.id_generator);
 
         fun(&mut builder);

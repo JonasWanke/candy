@@ -260,18 +260,18 @@ pub struct StoppedEventBody {
     /// If `allThreadsStopped` is true, a debug adapter can announce that all
     /// threads have stopped.
     /// - The client should use this information to enable that all threads can
-    /// be expanded to access their stacktraces.
+    ///   be expanded to access their stacktraces.
     /// - If the attribute is missing or false, only the thread with the given
-    /// `threadId` can be expanded.
+    ///   `threadId` can be expanded.
     pub all_threads_stopped: Option<bool>,
     /// Ids of the breakpoints that triggered the event. In most cases there is
     /// only a single breakpoint but here are some examples for multiple
     /// breakpoints:
     /// - Different types of breakpoints map to the same location.
     /// - Multiple source breakpoints get collapsed to the same instruction by
-    /// the compiler/runtime.
+    ///   the compiler/runtime.
     /// - Multiple function breakpoints with different function names map to the
-    /// same location.
+    ///   same location.
     pub hit_breakpoint_ids: Option<Vec<usize>>,
 }
 

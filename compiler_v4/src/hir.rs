@@ -117,7 +117,7 @@ impl ToText for Hir {
             (name.as_ref(), definition).build_text(builder);
             builder.push_newline();
         }
-        for impl_ in self.impls.iter() {
+        for impl_ in &self.impls {
             impl_.build_text(builder);
             builder.push_newline();
         }

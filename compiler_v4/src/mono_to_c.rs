@@ -58,7 +58,7 @@ impl<'h> Context<'h> {
         self.lower_function_definitions();
 
         self.push("int main() {\n");
-        for name in self.mono.assignment_initialization_order.iter() {
+        for name in &self.mono.assignment_initialization_order {
             self.push(format!("{name}$init();\n"));
         }
         self.push(format!(
@@ -99,7 +99,7 @@ impl<'h> Context<'h> {
                     self.push("};\n");
                 }
                 TypeDeclaration::Struct { fields } => {
-                    for (name, type_) in fields.iter() {
+                    for (name, type_) in &**fields {
                         self.push(format!("{type_}* {name}; "));
                     }
                     self.push("};\n");
@@ -107,14 +107,14 @@ impl<'h> Context<'h> {
                 TypeDeclaration::Enum { variants } => {
                     if !variants.is_empty() {
                         self.push("enum {");
-                        for variant in variants.iter() {
+                        for variant in &**variants {
                             self.push(format!("{name}_{},", variant.name));
                         }
                         self.push("} variant;\n");
                     }
 
                     self.push("union {");
-                    for variant in variants.iter() {
+                    for variant in &**variants {
                         if let Some(value_type) = &variant.value_type {
                             self.push(format!("{value_type}* {};", variant.name));
                         }
@@ -127,7 +127,7 @@ impl<'h> Context<'h> {
                 } => {
                     self.push("void* closure;\n");
                     self.push(format!("{return_type}* (*function)(void*"));
-                    for parameter_type in parameter_types.iter() {
+                    for parameter_type in &**parameter_types {
                         self.push(format!(", {parameter_type}*"));
                     }
                     self.push(");\n");
@@ -230,7 +230,7 @@ impl<'h> Context<'h> {
             "{}* {declaration_name}$lambda{id}_function(void* raw_closure",
             &lambda.body.return_type()
         ));
-        for parameter in lambda.parameters.iter() {
+        for parameter in &lambda.parameters {
             self.push(format!(", {}* {}", &parameter.type_, parameter.id));
         }
         self.push(")");
@@ -249,7 +249,7 @@ impl<'h> Context<'h> {
                 | ExpressionKind::CallFunction { .. }
                 | ExpressionKind::CallLambda { .. } => {}
                 ExpressionKind::Switch { cases, .. } => {
-                    for case in cases.iter() {
+                    for case in &**cases {
                         Self::visit_lambdas_inside_body(&case.body, visitor);
                     }
                 }
@@ -825,7 +825,7 @@ impl<'h> Context<'h> {
                     "{}* {id} = {lambda}->function({lambda}->closure",
                     &expression.type_
                 ));
-                for argument in arguments.iter() {
+                for argument in &**arguments {
                     self.push(format!(", {argument}"));
                 }
                 self.push(");");
@@ -838,7 +838,7 @@ impl<'h> Context<'h> {
                 self.push(format!("{}* {id};\n", &expression.type_));
 
                 self.push(format!("switch ({value}->variant) {{"));
-                for case in cases.iter() {
+                for case in &**cases {
                     self.push(format!("case {enum_}_{}:\n", case.variant));
                     if let Some((value_id, value_type)) = &case.value {
                         self.push(format!(

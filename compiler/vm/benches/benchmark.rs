@@ -1,5 +1,5 @@
-#![feature(absolute_path)]
 #![allow(unused_attributes)]
+#![allow(clippy::all)]
 
 use candy_frontend::module::PackagesPath;
 use candy_vm::{

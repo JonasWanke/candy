@@ -130,7 +130,7 @@ struct ImplDeclaration<'a> {
     trait_: Trait,
     functions: FxHashMap<Id, FunctionDeclaration<'a>>,
 }
-impl<'a> ImplDeclaration<'a> {
+impl ImplDeclaration<'_> {
     #[must_use]
     fn into_impl(self) -> Impl {
         Impl {
@@ -166,7 +166,7 @@ struct FunctionDeclaration<'a> {
     signature: Signature,
     body: Option<BodyOrBuiltin>,
 }
-impl<'a> FunctionDeclaration<'a> {
+impl FunctionDeclaration<'_> {
     fn signature_to_string(&self) -> String {
         format!("{}{}", self.name, self.signature)
     }
@@ -1195,7 +1195,7 @@ impl<'a> Context<'a> {
                 .collect_vec(),
             self_base_type,
             |builder| {
-                for parameter in function.signature.parameters.iter() {
+                for parameter in &function.signature.parameters {
                     builder.push_parameter(parameter.clone());
                 }
 
@@ -1229,7 +1229,7 @@ impl<'a> Context<'a> {
             .unwrap()
     }
 
-    fn get_all_functions_matching_name(&mut self, name: &str) -> Vec<Id> {
+    fn get_all_functions_matching_name(&self, name: &str) -> Vec<Id> {
         self.functions
             .iter()
             .chain(self.traits.iter().flat_map(|(_, trait_)| &trait_.functions))
@@ -1285,7 +1285,9 @@ impl<'c, 'a> BodyBuilder<'c, 'a> {
             self.type_parameters,
             self.self_base_type,
             |builder| {
-                builder.local_identifiers = self.local_identifiers.clone();
+                builder
+                    .local_identifiers
+                    .clone_from(&self.local_identifiers);
                 fun(builder);
                 self.global_assignment_dependencies
                     .extend(&builder.global_assignment_dependencies);
@@ -1433,14 +1435,12 @@ impl<'c, 'a> BodyBuilder<'c, 'a> {
                     type_: NamedType::text().into(),
                 }
             }
-            AstExpressionKind::Parenthesized(parenthesized) => {
-                return parenthesized
-                    .inner
-                    .value()
-                    .map_or(LoweredExpression::Error, |it| {
-                        self.lower_expression_raw(it, context_type)
-                    });
-            }
+            AstExpressionKind::Parenthesized(parenthesized) => parenthesized
+                .inner
+                .value()
+                .map_or(LoweredExpression::Error, |it| {
+                    self.lower_expression_raw(it, context_type)
+                }),
             AstExpressionKind::Call(call) => {
                 let type_arguments = call.type_arguments.as_ref().map(|it| {
                     it.arguments
@@ -1527,7 +1527,7 @@ impl<'c, 'a> BodyBuilder<'c, 'a> {
                                             type_arguments.as_deref(),
                                             &type_,
                                             &type_declaration.type_parameters,
-                                            fields,
+                                            fields.as_deref(),
                                         )
                                     }
                                     TypeDeclarationKind::Enum { .. } => {
@@ -1670,7 +1670,7 @@ impl<'c, 'a> BodyBuilder<'c, 'a> {
                 );
 
                 let body = self.build_inner(|builder| {
-                    for parameter in parameters.iter() {
+                    for parameter in &parameters {
                         builder.push_parameter(parameter.clone());
                     }
 
@@ -1861,7 +1861,7 @@ impl<'c, 'a> BodyBuilder<'c, 'a> {
         } else if let Some(type_parameter) = self.type_parameters.iter().find(|it| it.name == *name)
         {
             LoweredExpression::TypeParameterReference(type_parameter.type_())
-        } else if self.context.hir.type_declarations.get(name).is_some() {
+        } else if self.context.hir.type_declarations.contains_key(name) {
             LoweredExpression::NamedTypeReference(name.clone())
         } else {
             self.context.add_error(
@@ -2059,7 +2059,7 @@ impl<'c, 'a> BodyBuilder<'c, 'a> {
         type_arguments: Option<&[Type]>,
         type_: &str,
         type_parameters: &[TypeParameter],
-        fields: &Option<Box<[StructField]>>,
+        fields: Option<&[StructField]>,
     ) -> LoweredExpression {
         let Some(fields) = fields else {
             self.context.add_error(
@@ -2213,7 +2213,7 @@ impl<'c, 'a> BodyBuilder<'c, 'a> {
             .collect::<Box<_>>()
     }
     fn match_signature(
-        &mut self,
+        &self,
         trait_goal_and_subgoals: Option<(&SolverGoal, &[SolverGoal])>,
         type_parameters: &[TypeParameter],
         parameter_types: &[Type],
