@@ -44,6 +44,7 @@
 
 use self::{
     current_expression::{Context, CurrentExpression},
+    inlining::InliningState,
     log::OptimizationLogger,
     pure::PurenessInsights,
 };
@@ -155,6 +156,7 @@ impl Mir {
             visible: &mut VisibleExpressions::none_visible(),
             id_generator: &mut self.id_generator,
             pureness,
+            inlining_state: InliningState::default(),
         };
         context.optimize_body(&mut self.body);
         if cfg!(debug_assertions) {

@@ -44,6 +44,7 @@ use crate::{
     mir::{Expression, Id},
 };
 use rustc_hash::FxHashMap;
+use std::{collections::hash_map::Entry, num::NonZeroUsize};
 
 const NAME: &str = "Inlining";
 
@@ -113,6 +114,16 @@ pub fn inline_calls_with_constant_arguments(
     }
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct InliningState {
+    recursive_inlining_counts: FxHashMap<Id, NonZeroUsize>,
+}
+impl InliningState {
+    /// To avoid infinite recursion, we limit the number of times a function can
+    /// be inlined into itself in a single module.
+    const MAX_RECURSION_INLINING_COUNT_IN_MODULE: usize = 1;
+}
+
 impl Context<'_> {
     fn inline_call(&mut self, expression: &mut CurrentExpression) {
         let Expression::Call {
@@ -126,7 +137,22 @@ impl Context<'_> {
         };
         if arguments.contains(function) {
             // Callee is used as an argument → recursion
-            return;
+            match self
+                .inlining_state
+                .recursive_inlining_counts
+                .entry(*function)
+            {
+                Entry::Occupied(mut entry) => {
+                    let count = entry.get_mut();
+                    if count.get() >= InliningState::MAX_RECURSION_INLINING_COUNT_IN_MODULE {
+                        return;
+                    }
+                    *count = count.saturating_add(1);
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(NonZeroUsize::new(1).unwrap());
+                }
+            }
         }
 
         let Expression::Function {
