@@ -28,7 +28,7 @@ encode lines :=
   | iterator.joinToText
 
 testEncodeLine =
-  # TODO(JonaWanke): Add tests cases for leading/trailing whitespace when our parser is fixed,
+  # TODO(JonaWanke): Add test cases for leading/trailing whitespace when our parser is fixed,
   # https://github.com/candy-lang/candy/issues/896
   checkEquals (encodeLine (,)) ""
   checkEquals (encodeLine ("aaa",)) "aaa"

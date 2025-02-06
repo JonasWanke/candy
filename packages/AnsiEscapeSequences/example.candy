@@ -3,10 +3,6 @@
     "AnsiEscapeSequences"
 [equals, function, int, iterator, text, toDebugText] = use "Core"
 
-## TODO(JonasWanke): Use normal space in text (instead of NBSP) when
-## https://github.com/candy-lang/candy/issues/896 is fixed.
-nbsp = " "
-
 showGraphicRendition graphicRenditionText content =
   # n m	SGR	Sets colors and style of the characters following this code
   needs (text.is graphicRenditionText)
@@ -35,7 +31,7 @@ showStyles stdout =
     iterator.range 9 | iterator.map { index -> index | int.add 1 } | iterator.map { number ->
       showGraphicRendition (graphicRenditions.alternativeFont number) "Alternative Font {number}"
     }
-    | iterator.joinToTextWithSeparator nbsp
+    | iterator.joinToTextWithSeparator " "
   stdout (showGraphicRendition graphicRenditions.fraktur "Fraktur")
   stdout (showGraphicRendition graphicRenditions.doublyUnderlined "Doubly Underlined")
   stdout (showGraphicRendition graphicRenditions.normalIntensity "Normal Intensity")
@@ -78,9 +74,9 @@ showColors3Or4Bit stdout =
   line graphicRenditionFunction content =
     needs (function.is1 graphicRenditionFunction)
     needs (text.is content)
-    coloredLine 0 8 graphicRenditionFunction { color -> content } nbsp
-  columnHeaders = iterator.range 8 | iterator.map { color -> "{nbsp}{color} " }
-    | iterator.joinToTextWithSeparator nbsp
+    coloredLine 0 8 graphicRenditionFunction { color -> content } " "
+  columnHeaders =
+    iterator.range 8 | iterator.map { color -> " {color} " } | iterator.joinToTextWithSeparator " "
 
   stdout "# Colors: 3 and 4 Bit"
   stdout ""
@@ -89,8 +85,8 @@ showColors3Or4Bit stdout =
   stdout "Bright:    {line graphicRenditions.setBrightForegroundColor3Or4Bit "▓▓▓"}"
   stdout ""
   stdout "Background {columnHeaders}"
-  stdout "Normal:    {line graphicRenditions.setBackgroundColor3Or4Bit "{nbsp}  "}"
-  stdout "Bright:    {line graphicRenditions.setBrightBackgroundColor3Or4Bit "{nbsp}  "}"
+  stdout "Normal:    {line graphicRenditions.setBackgroundColor3Or4Bit "   "}"
+  stdout "Bright:    {line graphicRenditions.setBrightBackgroundColor3Or4Bit "   "}"
 
 showColors8Bit stdout =
   needs (function.is1 stdout)
@@ -126,7 +122,7 @@ showColors8Bit stdout =
   stdout ""
   block graphicRenditions.setForegroundColor8Or24Bit "▓"
   stdout ""
-  block graphicRenditions.setBackgroundColor8Or24Bit nbsp
+  block graphicRenditions.setBackgroundColor8Or24Bit " "
 
 main := { environment ->
   showStyles environment.stdout

@@ -9,6 +9,7 @@ use crate::{
     rcst::Rcst,
 };
 use itertools::Itertools;
+use std::mem;
 use tracing::instrument;
 
 // TODO: It might be a good idea to ignore text interpolations in patterns
@@ -36,10 +37,10 @@ pub fn text(input: &str, indentation: usize) -> Option<(&str, Rcst)> {
         .map(|(i, _)| i)
         .nth(1)
     {
-        let (first_whitespace, rest) = opening_whitespace.split_at(second_newline_index);
+        let rest = opening_whitespace.split_off(second_newline_index);
         (
-            first_whitespace.to_vec(),
-            convert_whitespace_into_text_newlines(rest.to_vec()),
+            opening_whitespace,
+            convert_whitespace_into_text_newlines(rest),
         )
     } else {
         (opening_whitespace, vec![])
@@ -57,7 +58,7 @@ pub fn text(input: &str, indentation: usize) -> Option<(&str, Rcst)> {
             input = input_after_part;
             parts.push(part);
         } else {
-            let (input_after_whitespace, whitespace) =
+            let (input_after_whitespace, mut whitespace) =
                 whitespaces_and_newlines(input, indentation + 1, false);
             input = input_after_whitespace;
 
@@ -68,16 +69,16 @@ pub fn text(input: &str, indentation: usize) -> Option<(&str, Rcst)> {
                 .map(|(i, _)| i)
                 .next_back()
             {
-                let (whitespace, rest) = whitespace.split_at(last_newline_index);
-                let mut newlines = convert_whitespace_into_text_newlines(whitespace.to_vec());
+                let rest = whitespace.split_off(last_newline_index);
+                let mut newlines = convert_whitespace_into_text_newlines(whitespace);
                 parts.append(&mut newlines);
-                rest.to_vec()
+                rest
             } else {
                 whitespace
             };
 
             // Allow closing quotes to have the same indentation level as the opening quotes
-            let (input_after_whitespace, whitespace) = if newline(input).is_some() {
+            let (input_after_whitespace, mut whitespace) = if newline(input).is_some() {
                 whitespaces_and_newlines(input, indentation, false)
             } else {
                 (input, Vec::new())
@@ -98,10 +99,10 @@ pub fn text(input: &str, indentation: usize) -> Option<(&str, Rcst)> {
                     .map(|(i, _)| i)
                     .next_back()
                 {
-                    let (whitespace, rest) = whitespace.split_at(last_newline_index);
-                    let mut newlines = convert_whitespace_into_text_newlines(whitespace.to_vec());
+                    let rest = whitespace.split_off(last_newline_index);
+                    let mut newlines = convert_whitespace_into_text_newlines(whitespace);
                     parts.append(&mut newlines);
-                    rest.to_vec()
+                    rest
                 } else {
                     let mut newlines =
                         convert_whitespace_into_text_newlines(whitespace_before_closing_quote);
@@ -252,25 +253,38 @@ fn text_part(mut input: &str, single_quotes_count: usize) -> Option<(&str, Rcst)
     }
 }
 
+/// Converts a vec of `CstKind::Newline(…)` and `CstKind::Whitespace(…)` into
+/// a vec of `CstKind::TrailingWhitespace { child: CstKind::TextNewline(…), … }`.
 #[instrument(level = "trace")]
 fn convert_whitespace_into_text_newlines(whitespace: Vec<Rcst>) -> Vec<Rcst> {
-    let mut last_newline: Option<Rcst> = None;
-    let mut whitespace_after_last_newline: Vec<Rcst> = vec![];
-    let mut parts: Vec<Rcst> = vec![];
-    for whitespace in whitespace
-        .iter()
-        .chain(std::iter::once(&CstKind::Newline("\n".to_string()).into()))
-    {
-        if let CstKind::Newline(newline) = whitespace.kind.clone() {
-            if let Some(last_newline) = last_newline {
-                parts.push(last_newline.wrap_in_whitespace(whitespace_after_last_newline));
-                whitespace_after_last_newline = vec![];
-            }
-            last_newline = Some(CstKind::TextNewline(newline).into());
-        } else {
-            whitespace_after_last_newline.push(whitespace.clone());
+    fn commit_last_newline(
+        parts: &mut Vec<Rcst>,
+        last_newline: Option<Rcst>,
+        whitespace_after_last_newline: Vec<Rcst>,
+    ) {
+        if let Some(last_newline) = last_newline {
+            parts.push(last_newline.wrap_in_whitespace(whitespace_after_last_newline));
         }
     }
+
+    let mut parts: Vec<Rcst> = vec![];
+    let mut last_newline: Option<Rcst> = None;
+    let mut whitespace_after_last_newline: Vec<Rcst> = vec![];
+
+    for whitespace in whitespace {
+        if let CstKind::Newline(newline) = whitespace.kind {
+            commit_last_newline(
+                &mut parts,
+                last_newline,
+                mem::take(&mut whitespace_after_last_newline),
+            );
+            last_newline = Some(CstKind::TextNewline(newline).into());
+        } else {
+            whitespace_after_last_newline.push(whitespace);
+        }
+    }
+    commit_last_newline(&mut parts, last_newline, whitespace_after_last_newline);
+
     parts
 }
 
