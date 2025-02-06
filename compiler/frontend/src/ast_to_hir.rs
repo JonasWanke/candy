@@ -385,34 +385,65 @@ impl Context<'_> {
                     cases
                         .iter()
                         .map(|case| match &case.kind {
-                            AstKind::MatchCase(MatchCase { box pattern, body }) => {
+                            AstKind::MatchCase(MatchCase {
+                                box pattern,
+                                condition,
+                                body,
+                            }) => {
                                 let (pattern, pattern_identifiers) = scope.lower_pattern(pattern);
 
-                                let (body, ()) = scope.with_scope(None, |scope| {
-                                    for (name, (ast_id, identifier_id)) in
-                                        pattern_identifiers.clone()
-                                    {
-                                        scope.push(
-                                            ast_id,
-                                            Expression::PatternIdentifierReference(identifier_id),
-                                            name.clone(),
-                                        );
-                                    }
-                                    scope.compile(body.as_ref());
-                                });
+                                let (outer_body, (condition_body, body)) =
+                                    scope.with_scope(None, |scope| {
+                                        for (name, (ast_id, identifier_id)) in
+                                            pattern_identifiers.clone()
+                                        {
+                                            scope.push(
+                                                ast_id,
+                                                Expression::PatternIdentifierReference(
+                                                    identifier_id,
+                                                ),
+                                                name.clone(),
+                                            );
+                                        }
 
-                                (pattern, body)
+                                        let condition = condition.as_ref().map(|box condition| {
+                                            scope
+                                                .with_scope(match_id.clone(), |condition_scope| {
+                                                    condition_scope.compile_single(condition);
+                                                })
+                                                .0
+                                        });
+
+                                        let (body, ()) =
+                                            scope.with_scope(match_id.clone(), |scope| {
+                                                scope.compile(body);
+                                            });
+
+                                        (condition, body)
+                                    });
+
+                                hir::MatchCase {
+                                    pattern,
+                                    identifier_expressions: outer_body,
+                                    condition: condition_body,
+                                    body,
+                                }
                             }
                             AstKind::Error { errors } => {
                                 let pattern = Pattern::Error {
                                     errors: errors.clone(),
                                 };
 
-                                let (body, ()) = scope.with_scope(None, |scope| {
-                                    scope.compile(&[]);
+                                let (body, inner_body) = scope.with_scope(None, |scope| {
+                                    scope.with_scope(match_id.clone(), |_scope| {}).0
                                 });
 
-                                (pattern, body)
+                                hir::MatchCase {
+                                    pattern,
+                                    identifier_expressions: body,
+                                    condition: None,
+                                    body: inner_body,
+                                }
                             }
                             _ => unreachable!("Expected match case in match cases, got {case:?}."),
                         })

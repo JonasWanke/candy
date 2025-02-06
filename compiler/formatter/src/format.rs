@@ -742,6 +742,7 @@ pub fn format_cst<'a>(
         }
         CstKind::MatchCase {
             pattern,
+            condition: _, // TODO: format match case conditions
             arrow,
             body,
         } => {

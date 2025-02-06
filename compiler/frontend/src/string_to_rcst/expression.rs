@@ -5,7 +5,7 @@ use super::{
     list::list,
     literal::{
         arrow, bar, closing_bracket, closing_curly_brace, closing_parenthesis, colon_equals_sign,
-        dot, equals_sign, percent,
+        comma, dot, equals_sign, percent,
     },
     struct_::struct_,
     text::text,
@@ -407,6 +407,31 @@ fn match_case(input: &str, indentation: usize) -> Option<(&str, Rcst)> {
     let (input, whitespace) = whitespaces_and_newlines(input, indentation, true);
     let pattern = pattern.wrap_in_whitespace(whitespace);
 
+    let (input, condition) = if let Some((input, condition_comma)) = comma(input) {
+        let (input, whitespace) = whitespaces_and_newlines(input, indentation, true);
+        let condition_comma = condition_comma.wrap_in_whitespace(whitespace);
+        if let Some((input, condition_expression)) = expression(
+            input,
+            indentation,
+            ExpressionParsingOptions {
+                allow_assignment: false,
+                allow_call: true,
+                allow_bar: true,
+                allow_function: true,
+            },
+        ) {
+            (input, Some((condition_comma, condition_expression)))
+        } else {
+            let error = CstKind::Error {
+                unparsable_input: String::new(),
+                error: CstError::MatchCaseMissesCondition,
+            };
+            (input, Some((condition_comma, error.into())))
+        }
+    } else {
+        (input, None)
+    };
+
     let (input, arrow) = if let Some((input, arrow)) = arrow(input) {
         let (input, whitespace) = whitespaces_and_newlines(input, indentation, true);
         (input, arrow.wrap_in_whitespace(whitespace))
@@ -431,6 +456,7 @@ fn match_case(input: &str, indentation: usize) -> Option<(&str, Rcst)> {
 
     let case = CstKind::MatchCase {
         pattern: Box::new(pattern),
+        condition: condition.map(Box::new),
         arrow: Box::new(arrow),
         body,
     };
@@ -623,6 +649,7 @@ mod test {
                   string: "123"
                 whitespace:
                   Whitespace " "
+              condition: None
               arrow: TrailingWhitespace:
                 child: Arrow
                 whitespace:
@@ -1091,6 +1118,7 @@ mod test {
                   string: "1"
                 whitespace:
                   Whitespace " "
+              condition: None
               arrow: TrailingWhitespace:
                 child: Arrow
                 whitespace:
@@ -1100,6 +1128,112 @@ mod test {
                   radix_prefix: None
                   value: 2
                   string: "2"
+        "###
+        );
+        assert_rich_ir_snapshot!(
+          expression("foo %\n  n, n | int.atLeast 4 -> 42", 0,
+                ExpressionParsingOptions {
+                    allow_assignment: true,
+                    allow_call: true,
+                    allow_bar: true,
+                    allow_function: true
+                }),
+                @r###"
+        Remaining input: ""
+        Parsed: Match:
+          expression: TrailingWhitespace:
+            child: Identifier "foo"
+            whitespace:
+              Whitespace " "
+          percent: TrailingWhitespace:
+            child: Percent
+            whitespace:
+              Newline "\n"
+              Whitespace "  "
+          cases:
+            MatchCase:
+              pattern: Identifier "n"
+              condition:
+                comma: TrailingWhitespace:
+                  child: Comma
+                  whitespace:
+                    Whitespace " "
+                expression: BinaryBar:
+                  left: TrailingWhitespace:
+                    child: Identifier "n"
+                    whitespace:
+                      Whitespace " "
+                  bar: TrailingWhitespace:
+                    child: Bar
+                    whitespace:
+                      Whitespace " "
+                  right: TrailingWhitespace:
+                    child: Call:
+                      receiver: TrailingWhitespace:
+                        child: StructAccess:
+                          struct: Identifier "int"
+                          dot: Dot
+                          key: Identifier "atLeast"
+                        whitespace:
+                          Whitespace " "
+                      arguments:
+                        Int:
+                          radix_prefix: None
+                          value: 4
+                          string: "4"
+                    whitespace:
+                      Whitespace " "
+              arrow: TrailingWhitespace:
+                child: Arrow
+                whitespace:
+                  Whitespace " "
+              body:
+                Int:
+                  radix_prefix: None
+                  value: 42
+                  string: "42"
+        "###
+        );
+        assert_rich_ir_snapshot!(
+          expression("foo %\n  n, -> 42", 0,
+                ExpressionParsingOptions {
+                    allow_assignment: true,
+                    allow_call: true,
+                    allow_bar: true,
+                    allow_function: true
+                }),
+                @r###"
+        Remaining input: ""
+        Parsed: Match:
+          expression: TrailingWhitespace:
+            child: Identifier "foo"
+            whitespace:
+              Whitespace " "
+          percent: TrailingWhitespace:
+            child: Percent
+            whitespace:
+              Newline "\n"
+              Whitespace "  "
+          cases:
+            MatchCase:
+              pattern: Identifier "n"
+              condition:
+                comma: TrailingWhitespace:
+                  child: Comma
+                  whitespace:
+                    Whitespace " "
+                expression: Error:
+                  unparsable_input: ""
+                  error: MatchCaseMissesCondition
+              arrow: TrailingWhitespace:
+                child: Arrow
+                whitespace:
+                  Whitespace " "
+              body:
+                Int:
+                  radix_prefix: None
+                  value: 42
+                  string: "42"
         "###
         );
         // foo bar =
@@ -1462,11 +1596,11 @@ mod test {
               fields:
                 StructField:
                   key_and_colon:
-                  key: Symbol "Foo"
-                  colon: TrailingWhitespace:
-                    child: Colon
-                    whitespace:
-                      Whitespace " "
+                    key: Symbol "Foo"
+                    colon: TrailingWhitespace:
+                      child: Colon
+                      whitespace:
+                        Whitespace " "
                   value: Identifier "foo"
                   comma: None
               closing_bracket: ClosingBracket

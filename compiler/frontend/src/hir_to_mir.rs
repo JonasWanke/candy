@@ -126,30 +126,12 @@ fn generate_needs_function(body: &mut BodyBuilder) -> Id {
         // Common stuff.
         let needs_code = body.push_hir_id(needs_id.clone());
         let builtin_equals = body.push_builtin(BuiltinFunction::Equals);
-        let nothing_tag = body.push_nothing();
 
         // Make sure the condition is a bool.
-        let true_tag = body.push_bool(true);
-        let false_tag = body.push_bool(false);
-        let is_condition_true =
-            body.push_call(builtin_equals, vec![condition, true_tag], needs_code);
-        let is_condition_bool = body.push_if_else(
-            &needs_id.child("isConditionTrue"),
-            is_condition_true,
-            |body| {
-                body.push_reference(true_tag);
-            },
-            |body| {
-                body.push_call(builtin_equals, vec![condition, false_tag], needs_code);
-            },
-            needs_code,
-        );
-        body.push_if_else(
+        let is_condition_bool = body.push_is_bool(&needs_id, condition, needs_code);
+        body.push_if_not(
             &needs_id.child("isConditionBool"),
             is_condition_bool,
-            |body| {
-                body.push_reference(nothing_tag);
-            },
             |body| {
                 let panic_reason =
                     body.push_text("The `condition` must be either `True` or `False`.".to_string());
@@ -167,12 +149,9 @@ fn generate_needs_function(body: &mut BodyBuilder) -> Id {
             vec![type_of_reason, text_tag],
             responsible_for_call,
         );
-        body.push_if_else(
+        body.push_if_not(
             &needs_id.child("isReasonText"),
             is_reason_text,
-            |body| {
-                body.push_reference(nothing_tag);
-            },
             |body| {
                 let panic_reason = body.push_text("The `reason` must be a text.".to_string());
                 body.push_panic(panic_reason, responsible_for_call);
@@ -181,12 +160,9 @@ fn generate_needs_function(body: &mut BodyBuilder) -> Id {
         );
 
         // The core logic of the needs.
-        body.push_if_else(
+        body.push_if_not(
             &needs_id.child("condition"),
             condition,
-            |body| {
-                body.push_reference(nothing_tag);
-            },
             |body| {
                 body.push_panic(reason, responsible_for_condition);
             },
@@ -206,7 +182,7 @@ struct LoweringContext<'a> {
 struct OngoingDestructuring {
     result: Id,
 
-    /// Assignments such as `foo = …` are considered trivial.
+    /// Assignments such as `foo = …` or simple match patters (something % foo -> ...) are considered trivial.
     is_trivial: bool,
 }
 
@@ -370,14 +346,10 @@ impl<'a> LoweringContext<'a> {
                         is_trivial: false,
                     });
 
-                    let nothing = body.push_nothing();
                     let is_match = body.push_is_match(pattern_result, responsible);
-                    body.push_if_else(
+                    body.push_if_not(
                         &hir_id.child("isMatch"),
                         is_match,
-                        |body| {
-                            body.push_reference(nothing);
-                        },
                         |body| {
                             let reason = body.push_text("The value doesn't match the pattern on the left side of the destructuring.".to_string());
                             body.push_panic(reason, responsible);
@@ -629,7 +601,7 @@ impl<'a> LoweringContext<'a> {
         hir_id: hir::Id,
         body: &mut BodyBuilder,
         expression: Id,
-        cases: &[(hir::Pattern, hir::Body)],
+        cases: &[hir::MatchCase],
         responsible_for_needs: Id,
         responsible_for_match: Id,
     ) -> Id {
@@ -649,7 +621,7 @@ impl<'a> LoweringContext<'a> {
         hir_id: hir::Id,
         body: &mut BodyBuilder,
         expression: Id,
-        cases: &[(hir::Pattern, hir::Body)],
+        cases: &[hir::MatchCase],
         responsible_for_needs: Id,
         responsible_for_match: Id,
         case_index: usize,
@@ -660,7 +632,12 @@ impl<'a> LoweringContext<'a> {
                 // TODO: concat reasons
                 body.push_panic(reason, responsible_for_match)
             }
-            [(case_pattern, case_body), rest @ ..] => {
+            [hir::MatchCase {
+                pattern: case_pattern,
+                identifier_expressions: case_identifiers,
+                condition: case_condition,
+                body: case_body,
+            }, rest @ ..] => {
                 let pattern_result = PatternLoweringContext::check_pattern(
                     body,
                     hir_id.clone(),
@@ -669,17 +646,10 @@ impl<'a> LoweringContext<'a> {
                     case_pattern,
                 );
 
-                let is_match = body.push_is_match(pattern_result, responsible_for_match);
-
+                let is_pattern_match = body.push_is_match(pattern_result, responsible_for_match);
                 let case_id = hir_id.child(format!("case-{case_index}"));
                 let builtin_if_else = body.push_builtin(BuiltinFunction::IfElse);
-                let then_function = body.push_function(case_id.child("matched"), |body, _| {
-                    self.ongoing_destructuring = Some(OngoingDestructuring {
-                        result: pattern_result,
-                        is_trivial: false,
-                    });
-                    self.compile_expressions(body, responsible_for_needs, &case_body.expressions);
-                });
+
                 let else_function = body.push_function(case_id.child("didNotMatch"), |body, _| {
                     self.compile_match_rec(
                         hir_id,
@@ -691,13 +661,81 @@ impl<'a> LoweringContext<'a> {
                         case_index + 1,
                     );
                 });
+
+                let then_function = body.push_function(case_id.child("patternMatch"), |body, _| {
+                    self.ongoing_destructuring = Some(OngoingDestructuring {
+                        result: pattern_result,
+                        is_trivial: false,
+                    });
+                    self.compile_expressions(
+                        body,
+                        responsible_for_needs,
+                        &case_identifiers.expressions,
+                    );
+
+                    self.compile_match_case_body(
+                        &case_id,
+                        body,
+                        case_condition,
+                        case_body,
+                        else_function,
+                        responsible_for_needs,
+                        responsible_for_match,
+                    );
+                });
+
                 body.push_call(
                     builtin_if_else,
-                    vec![is_match, then_function, else_function],
+                    vec![is_pattern_match, then_function, else_function],
                     responsible_for_match,
                 )
             }
         }
+    }
+    #[allow(clippy::too_many_arguments)]
+    fn compile_match_case_body(
+        &mut self,
+        case_id: &hir::Id,
+        body: &mut BodyBuilder,
+        case_condition: &Option<hir::Body>,
+        case_body: &hir::Body,
+        else_function: Id,
+        responsible_for_needs: Id,
+        responsible_for_match: Id,
+    ) {
+        let builtin_if_else = body.push_builtin(BuiltinFunction::IfElse);
+        if let Some(condition) = case_condition {
+            self.compile_expressions(body, responsible_for_needs, &condition.expressions);
+            let condition_result = body.current_return_value();
+
+            let is_boolean = body.push_is_bool(case_id, condition_result, responsible_for_match);
+            body.push_if_not(
+                &case_id.child("conditionCheck"),
+                is_boolean,
+                |body| {
+                    let reason_parts = [
+                        body.push_text("Match Condition expected boolean value, got `".to_string()),
+                        body.push_to_debug_text(condition_result, responsible_for_match),
+                        body.push_text("`".to_string()),
+                    ];
+                    let reason = body.push_text_concatenate(&reason_parts, responsible_for_match);
+                    body.push_panic(reason, responsible_for_match);
+                },
+                responsible_for_match,
+            );
+
+            let then_function = body.push_function(case_id.child("conditionMatch"), |body, _| {
+                self.compile_expressions(body, responsible_for_needs, &case_body.expressions);
+            });
+
+            body.push_call(
+                builtin_if_else,
+                vec![condition_result, then_function, else_function],
+                responsible_for_needs,
+            );
+        } else {
+            self.compile_expressions(body, responsible_for_needs, &case_body.expressions);
+        };
     }
 
     fn push_call(

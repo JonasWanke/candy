@@ -63,6 +63,7 @@ impl Display for CompilerErrorPayload {
                 CstError::MatchMissesCases => "This match misses cases to match against.",
                 CstError::MatchCaseMissesArrow => "This match case misses an arrow.",
                 CstError::MatchCaseMissesBody => "This match case misses a body to run.",
+                CstError::MatchCaseMissesCondition => "This match case condition is empty.",
                 CstError::OpeningParenthesisMissesExpression => {
                     "Here's an opening parenthesis without an expression after it."
                 }

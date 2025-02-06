@@ -2,7 +2,7 @@ use super::{Cst, CstData, CstError};
 use crate::rich_ir::{RichIrBuilder, ToRichIr, TokenType};
 use enumset::EnumSet;
 use num_bigint::{BigInt, BigUint};
-use std::fmt::{self, Display, Formatter};
+use std::fmt::{self, Display, Formatter, Pointer};
 use strum_macros::EnumIs;
 
 #[derive(Clone, Debug, EnumIs, Eq, Hash, PartialEq)]
@@ -106,6 +106,7 @@ pub enum CstKind<D = CstData> {
     },
     MatchCase {
         pattern: Box<Cst<D>>,
+        condition: Option<MatchCaseWithComma<D>>,
         arrow: Box<Cst<D>>,
         body: Vec<Cst<D>>,
     },
@@ -130,6 +131,7 @@ pub enum IntRadix {
     Binary,
     Hexadecimal,
 }
+pub type MatchCaseWithComma<D> = Box<(Cst<D>, Cst<D>)>;
 pub type FunctionParametersAndArrow<D> = (Vec<Cst<D>>, Box<Cst<D>>);
 
 impl<D> CstKind<D> {
@@ -291,10 +293,14 @@ impl<D> CstKind<D> {
             }
             Self::MatchCase {
                 pattern,
+                condition,
                 arrow,
                 body,
             } => {
                 let mut children = vec![pattern.as_ref(), arrow.as_ref()];
+                if let Some(box (comma, condition)) = condition {
+                    children.extend([&comma, &condition]);
+                }
                 children.extend(body);
                 children
             }
@@ -507,11 +513,16 @@ impl<D> Display for CstKind<D> {
             }
             Self::MatchCase {
                 pattern,
+                condition,
                 arrow,
                 body,
             } => {
                 pattern.fmt(f)?;
                 arrow.fmt(f)?;
+                if let Some(box (comma, condition)) = condition {
+                    comma.fmt(f)?;
+                    condition.fmt(f)?;
+                }
                 for expression in body {
                     expression.fmt(f)?;
                 }
@@ -625,15 +636,15 @@ where
                 comment,
             } => {
                 builder.push_cst_kind("Comment", |builder| {
-                    builder.push_cst_kind_property("octothorpe", octothorpe);
-                    builder.push_cst_kind_property("comment", format!("\"{comment}\""));
+                    builder.push_cst_property("octothorpe", octothorpe);
+                    builder.push_cst_property("comment", format!("\"{comment}\""));
                 });
             }
             Self::TrailingWhitespace { child, whitespace } => {
                 builder.push_cst_kind("TrailingWhitespace", |builder| {
-                    builder.push_cst_kind_property("child", child);
+                    builder.push_cst_property("child", child);
 
-                    builder.push_cst_kind_property_name("whitespace");
+                    builder.push_cst_property_name("whitespace");
                     builder.push_indented_foldable(|builder| {
                         for whitespace in whitespace {
                             builder.push_newline();
@@ -655,21 +666,20 @@ where
             } => {
                 let start = builder.push_simple("Int:").start;
                 builder.push_indented_foldable(|builder| {
-                    builder.push_cst_kind_property_name("radix_prefix");
-                    if let Some((radix, prefix)) = radix_prefix {
-                        builder.push_indented_foldable(|builder| {
-                            builder.push_cst_kind_property("radix", format!("{radix:?}"));
-                            builder.push_cst_kind_property("prefix", format!("\"{prefix}\""));
-                        });
-                    } else {
-                        builder.push_simple(" None");
-                    }
+                    builder.push_indented_optional_cst_property(
+                        "radix_prefix",
+                        radix_prefix.as_ref(),
+                        |builder, (radix, prefix)| {
+                            builder.push_cst_property("radix", format!("{radix:?}"));
+                            builder.push_cst_property("prefix", format!("\"{prefix}\""));
+                        },
+                    );
 
-                    builder.push_cst_kind_property_name("value");
+                    builder.push_cst_property_name("value");
                     builder.push_simple(" ");
                     builder.push(value.to_string(), TokenType::Int, EnumSet::new());
 
-                    builder.push_cst_kind_property("string", format!("\"{string}\""));
+                    builder.push_cst_property("string", format!("\"{string}\""));
                 });
                 builder
                     .push_reference(BigInt::from(value.clone()), start..builder.current_offset());
@@ -679,7 +689,7 @@ where
                 opening_double_quote,
             } => {
                 builder.push_cst_kind("OpeningText", |builder| {
-                    builder.push_cst_kind_property_name("opening_single_quotes");
+                    builder.push_cst_property_name("opening_single_quotes");
                     builder.push_indented_foldable(|builder| {
                         for opening_single_quote in opening_single_quotes {
                             builder.push_newline();
@@ -687,7 +697,7 @@ where
                         }
                     });
 
-                    builder.push_cst_kind_property("opening_double_quote", opening_double_quote);
+                    builder.push_cst_property("opening_double_quote", opening_double_quote);
                 });
             }
             Self::ClosingText {
@@ -695,9 +705,9 @@ where
                 closing_single_quotes,
             } => {
                 builder.push_cst_kind("ClosingText", |builder| {
-                    builder.push_cst_kind_property("closing_double_quote", closing_double_quote);
+                    builder.push_cst_property("closing_double_quote", closing_double_quote);
 
-                    builder.push_cst_kind_property_name("closing_single_quotes");
+                    builder.push_cst_property_name("closing_single_quotes");
                     builder.push_indented_foldable(|builder| {
                         for closing_single_quote in closing_single_quotes {
                             builder.push_newline();
@@ -712,9 +722,9 @@ where
                 closing,
             } => {
                 builder.push_cst_kind("Text", |builder| {
-                    builder.push_cst_kind_property("opening", opening);
+                    builder.push_cst_property("opening", opening);
 
-                    builder.push_cst_kind_property_name("parts");
+                    builder.push_cst_property_name("parts");
                     builder.push_indented_foldable(|builder| {
                         for part in parts {
                             builder.push_newline();
@@ -722,7 +732,7 @@ where
                         }
                     });
 
-                    builder.push_cst_kind_property("closing", closing);
+                    builder.push_cst_property("closing", closing);
                 });
             }
             Self::TextNewline(newline) => {
@@ -743,7 +753,7 @@ where
                 closing_curly_braces,
             } => {
                 builder.push_cst_kind("TextInterpolation", |builder| {
-                    builder.push_cst_kind_property_name("opening_curly_braces");
+                    builder.push_cst_property_name("opening_curly_braces");
                     builder.push_indented_foldable(|builder| {
                         for opening_curly_brace in opening_curly_braces {
                             builder.push_newline();
@@ -751,9 +761,9 @@ where
                         }
                     });
 
-                    builder.push_cst_kind_property("expression", expression);
+                    builder.push_cst_property("expression", expression);
 
-                    builder.push_cst_kind_property_name("closing_curly_braces");
+                    builder.push_cst_property_name("closing_curly_braces");
                     builder.push_indented_foldable(|builder| {
                         for closing_curly_brace in closing_curly_braces {
                             builder.push_newline();
@@ -764,11 +774,11 @@ where
             }
             Self::BinaryBar { left, bar, right } => {
                 builder.push_cst_kind("BinaryBar", |builder| {
-                    builder.push_cst_kind_property("left", left);
+                    builder.push_cst_property("left", left);
 
-                    builder.push_cst_kind_property("bar", bar);
+                    builder.push_cst_property("bar", bar);
 
-                    builder.push_cst_kind_property("right", right);
+                    builder.push_cst_property("right", right);
                 });
             }
             Self::Parenthesized {
@@ -777,11 +787,11 @@ where
                 closing_parenthesis,
             } => {
                 builder.push_cst_kind("Parenthesized", |builder| {
-                    builder.push_cst_kind_property("opening_parenthesis", opening_parenthesis);
+                    builder.push_cst_property("opening_parenthesis", opening_parenthesis);
 
-                    builder.push_cst_kind_property("inner", inner);
+                    builder.push_cst_property("inner", inner);
 
-                    builder.push_cst_kind_property("closing_parenthesis", closing_parenthesis);
+                    builder.push_cst_property("closing_parenthesis", closing_parenthesis);
                 });
             }
             Self::Call {
@@ -789,9 +799,9 @@ where
                 arguments,
             } => {
                 builder.push_cst_kind("Call", |builder| {
-                    builder.push_cst_kind_property("receiver", receiver);
+                    builder.push_cst_property("receiver", receiver);
 
-                    builder.push_cst_kind_property_name("arguments");
+                    builder.push_cst_property_name("arguments");
                     builder.push_indented_foldable(|builder| {
                         for argument in arguments {
                             builder.push_newline();
@@ -806,9 +816,9 @@ where
                 closing_parenthesis,
             } => {
                 builder.push_cst_kind("List", |builder| {
-                    builder.push_cst_kind_property("opening_parenthesis", opening_parenthesis);
+                    builder.push_cst_property("opening_parenthesis", opening_parenthesis);
 
-                    builder.push_cst_kind_property_name("items");
+                    builder.push_cst_property_name("items");
                     builder.push_indented_foldable(|builder| {
                         for item in items {
                             builder.push_newline();
@@ -816,20 +826,14 @@ where
                         }
                     });
 
-                    builder.push_cst_kind_property("closing_parenthesis", closing_parenthesis);
+                    builder.push_cst_property("closing_parenthesis", closing_parenthesis);
                 });
             }
             Self::ListItem { value, comma } => {
                 builder.push_cst_kind("ListItem", |builder| {
-                    builder.push_cst_kind_property("value", value);
+                    builder.push_cst_property("value", value);
 
-                    builder.push_cst_kind_property_name("comma");
-                    builder.push_simple(" ");
-                    if let Some(comma) = comma {
-                        comma.build_rich_ir(builder);
-                    } else {
-                        builder.push_simple("None");
-                    }
+                    builder.push_optional_cst_property("comma", comma.as_ref());
                 });
             }
             Self::Struct {
@@ -838,9 +842,9 @@ where
                 closing_bracket,
             } => {
                 builder.push_cst_kind("Struct", |builder| {
-                    builder.push_cst_kind_property("opening_bracket", opening_bracket);
+                    builder.push_cst_property("opening_bracket", opening_bracket);
 
-                    builder.push_cst_kind_property_name("fields");
+                    builder.push_cst_property_name("fields");
                     builder.push_indented_foldable(|builder| {
                         for field in fields {
                             builder.push_newline();
@@ -848,7 +852,7 @@ where
                         }
                     });
 
-                    builder.push_cst_kind_property("closing_bracket", closing_bracket);
+                    builder.push_cst_property("closing_bracket", closing_bracket);
                 });
             }
             Self::StructField {
@@ -857,30 +861,25 @@ where
                 comma,
             } => {
                 builder.push_cst_kind("StructField", |builder| {
-                    builder.push_cst_kind_property_name("key_and_colon");
-                    if let Some(box (key, colon)) = key_and_colon {
-                        builder.push_cst_kind_property("key", key);
-                        builder.push_cst_kind_property("colon", colon);
-                    } else {
-                        builder.push_simple(" None");
-                    }
+                    builder.push_indented_optional_cst_property(
+                        "key_and_colon",
+                        key_and_colon.as_ref(),
+                        |builder, box (key, colon)| {
+                            builder.push_cst_property("key", key);
+                            builder.push_cst_property("colon", colon);
+                        },
+                    );
 
-                    builder.push_cst_kind_property("value", value);
+                    builder.push_cst_property("value", value);
 
-                    builder.push_cst_kind_property_name("comma");
-                    builder.push_simple(" ");
-                    if let Some(comma) = comma {
-                        comma.build_rich_ir(builder);
-                    } else {
-                        builder.push_simple("None");
-                    }
+                    builder.push_optional_cst_property("comma", comma.as_ref());
                 });
             }
             Self::StructAccess { struct_, dot, key } => {
                 builder.push_cst_kind("StructAccess", |builder| {
-                    builder.push_cst_kind_property("struct", struct_);
-                    builder.push_cst_kind_property("dot", dot);
-                    builder.push_cst_kind_property("key", key);
+                    builder.push_cst_property("struct", struct_);
+                    builder.push_cst_property("dot", dot);
+                    builder.push_cst_property("key", key);
                 });
             }
             Self::Match {
@@ -889,10 +888,10 @@ where
                 cases,
             } => {
                 builder.push_cst_kind("Match", |builder| {
-                    builder.push_cst_kind_property("expression", expression);
-                    builder.push_cst_kind_property("percent", percent);
+                    builder.push_cst_property("expression", expression);
+                    builder.push_cst_property("percent", percent);
 
-                    builder.push_cst_kind_property_name("cases");
+                    builder.push_cst_property_name("cases");
                     builder.push_indented_foldable(|builder| {
                         for case in cases {
                             builder.push_newline();
@@ -904,13 +903,24 @@ where
             Self::MatchCase {
                 pattern,
                 arrow,
+                condition,
                 body,
             } => {
                 builder.push_cst_kind("MatchCase", |builder| {
-                    builder.push_cst_kind_property("pattern", pattern);
-                    builder.push_cst_kind_property("arrow", arrow);
+                    builder.push_cst_property("pattern", pattern);
 
-                    builder.push_cst_kind_property_name("body");
+                    builder.push_indented_optional_cst_property(
+                        "condition",
+                        condition.as_ref(),
+                        |builder, box (comma, condition)| {
+                            builder.push_cst_property("comma", comma);
+                            builder.push_cst_property("expression", condition);
+                        },
+                    );
+
+                    builder.push_cst_property("arrow", arrow);
+
+                    builder.push_cst_property_name("body");
                     builder.push_indented_foldable(|builder| {
                         for expression in body {
                             builder.push_newline();
@@ -926,26 +936,24 @@ where
                 closing_curly_brace,
             } => {
                 builder.push_cst_kind("Function", |builder| {
-                    builder.push_cst_kind_property("opening_curly_brace", opening_curly_brace);
+                    builder.push_cst_property("opening_curly_brace", opening_curly_brace);
 
-                    builder.push_cst_kind_property_name("parameters_and_arrow");
-                    if let Some((parameters, arrow)) = parameters_and_arrow {
-                        builder.push_indented_foldable(|builder| {
-                            builder.push_cst_kind_property_name("parameters");
-                            builder.push_indented_foldable(|builder| {
-                                for parameter in parameters {
+                    builder.push_indented_optional_cst_property(
+                        "parameters_and_arrow",
+                        parameters_and_arrow.as_ref(),
+                        |builder, (parameters, arrow)| {
+                            builder.push_newline();
+                            builder.push_cst_kind("parameters", |builder| {
+                                if !parameters.is_empty() {
                                     builder.push_newline();
-                                    parameter.build_rich_ir(builder);
+                                    builder.push_multiline(parameters);
                                 }
                             });
+                            builder.push_cst_property("arrow", arrow);
+                        },
+                    );
 
-                            builder.push_cst_kind_property("arrow", arrow);
-                        });
-                    } else {
-                        builder.push_simple(" None");
-                    }
-
-                    builder.push_cst_kind_property_name("body");
+                    builder.push_cst_property_name("body");
                     builder.push_indented_foldable(|builder| {
                         for expression in body {
                             builder.push_newline();
@@ -953,7 +961,7 @@ where
                         }
                     });
 
-                    builder.push_cst_kind_property("closing_curly_brace", closing_curly_brace);
+                    builder.push_cst_property("closing_curly_brace", closing_curly_brace);
                 });
             }
             Self::Assignment {
@@ -962,10 +970,10 @@ where
                 body,
             } => {
                 builder.push_cst_kind("Assignment", |builder| {
-                    builder.push_cst_kind_property("left", left);
-                    builder.push_cst_kind_property("assignment_sign", assignment_sign);
+                    builder.push_cst_property("left", left);
+                    builder.push_cst_property("assignment_sign", assignment_sign);
 
-                    builder.push_cst_kind_property_name("body");
+                    builder.push_cst_property_name("body");
                     builder.push_indented_foldable(|builder| {
                         for expression in body {
                             builder.push_newline();
@@ -979,11 +987,9 @@ where
                 error,
             } => {
                 builder.push_cst_kind("Error", |builder| {
-                    builder.push_cst_kind_property(
-                        "unparsable_input",
-                        format!("\"{unparsable_input}\""),
-                    );
-                    builder.push_cst_kind_property("error", format!("{error:?}"));
+                    builder
+                        .push_cst_property("unparsable_input", format!("\"{unparsable_input}\""));
+                    builder.push_cst_property("error", format!("{error:?}"));
                 });
             }
         }
@@ -994,13 +1000,43 @@ impl RichIrBuilder {
         self.push_simple(format!("{kind}:"));
         self.push_indented_foldable(build_children);
     }
-    fn push_cst_kind_property_name(&mut self, property_name: &str) {
+    fn push_cst_property_name(&mut self, property_name: &str) {
         self.push_newline();
         self.push_simple(format!("{property_name}:"));
     }
-    fn push_cst_kind_property(&mut self, property_name: &str, value: impl ToRichIr) {
-        self.push_newline();
-        self.push_simple(format!("{property_name}: "));
+    fn push_cst_property(&mut self, property_name: &str, value: impl ToRichIr) {
+        self.push_cst_property_name(property_name);
+        self.push_simple(" ");
         value.build_rich_ir(self);
+    }
+    fn push_none(&mut self) {
+        self.push_simple("None");
+    }
+
+    fn push_optional_cst_property(&mut self, property_name: &str, value: Option<impl ToRichIr>) {
+        self.push_cst_property_name(property_name);
+        self.push_simple(" ");
+        if let Some(value) = value {
+            value.build_rich_ir(self);
+        } else {
+            self.push_none();
+        }
+    }
+
+    fn push_indented_optional_cst_property<T>(
+        &mut self,
+        property_name: &str,
+        value: Option<T>,
+        build_children: impl FnOnce(&mut Self, T),
+    ) {
+        self.push_cst_property_name(property_name);
+        if let Some(v) = value {
+            self.push_indented_foldable(|builder| {
+                build_children(builder, v);
+            });
+        } else {
+            self.push_simple(" ");
+            self.push_none();
+        }
     }
 }

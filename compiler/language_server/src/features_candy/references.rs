@@ -2,7 +2,7 @@ use crate::{features::Reference, utils::LspPositionConversion};
 use candy_frontend::{
     ast_to_hir::AstToHir,
     cst::{CstDb, CstKind},
-    hir::{self, Body, Expression, Function, HirDb},
+    hir::{self, Body, Expression, Function, HirDb, MatchCase},
     module::{Module, ModuleDb},
     position::{Offset, PositionConversionDb},
 };
@@ -173,7 +173,10 @@ where
             | Expression::Destructure { .. }
             | Expression::PatternIdentifierReference(_) => {}
             Expression::Match { cases, .. } => {
-                for (_, body) in cases {
+                for MatchCase{condition, body, ..} in cases {
+                    if let Some(condition) = condition {
+                        self.visit_body(condition);
+                    }
                     self.visit_body(body);
                 }
             }

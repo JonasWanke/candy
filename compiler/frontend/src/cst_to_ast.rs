@@ -584,23 +584,36 @@ impl LoweringContext {
             }
             CstKind::MatchCase {
                 pattern,
-                arrow: _,
+                condition,
+                arrow,
                 body,
             } => {
                 if lowering_type != LoweringType::Expression {
                     return self.create_ast_for_invalid_expression_in_pattern(cst);
                 };
-
+                let mut errors = vec![];
                 let pattern = self.lower_cst(pattern, LoweringType::Pattern);
 
-                // TODO: handle error in arrow
+                let condition = condition
+                    .as_ref()
+                    .map(|box (_, condition)| self.lower_cst(condition, LoweringType::Expression));
+
+                if let CstKind::Error {
+                    unparsable_input: _,
+                    error,
+                } = arrow.kind
+                {
+                    errors.push(self.create_error(arrow, error));
+                }
 
                 let body = self.lower_csts(body);
 
-                self.create_ast(
-                    cst.data.id,
+                self.create_errors_or_ast(
+                    cst,
+                    errors,
                     MatchCase {
                         pattern: Box::new(pattern),
+                        condition: condition.map(Box::new),
                         body,
                     },
                 )

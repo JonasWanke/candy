@@ -220,8 +220,8 @@ mod test {
           fields:
             StructField:
               key_and_colon:
-              key: Identifier "foo"
-              colon: Colon
+                key: Identifier "foo"
+                colon: Colon
               value: Identifier "bar"
               comma: None
           closing_bracket: ClosingBracket
@@ -237,8 +237,8 @@ mod test {
               comma: Comma
             StructField:
               key_and_colon:
-              key: Identifier "bar"
-              colon: Colon
+                key: Identifier "bar"
+                colon: Colon
               value: Identifier "baz"
               comma: None
           closing_bracket: ClosingBracket
@@ -275,11 +275,11 @@ mod test {
             TrailingWhitespace:
               child: StructField:
                 key_and_colon:
-                key: Identifier "foo"
-                colon: TrailingWhitespace:
-                  child: Colon
-                  whitespace:
-                    Whitespace " "
+                  key: Identifier "foo"
+                  colon: TrailingWhitespace:
+                    child: Colon
+                    whitespace:
+                      Whitespace " "
                 value: Identifier "bar"
                 comma: Comma
               whitespace:
@@ -288,14 +288,14 @@ mod test {
             TrailingWhitespace:
               child: StructField:
                 key_and_colon:
-                key: Int:
-                  radix_prefix: None
-                  value: 4
-                  string: "4"
-                colon: TrailingWhitespace:
-                  child: Colon
-                  whitespace:
-                    Whitespace " "
+                  key: Int:
+                    radix_prefix: None
+                    value: 4
+                    string: "4"
+                  colon: TrailingWhitespace:
+                    child: Colon
+                    whitespace:
+                      Whitespace " "
                 value: Text:
                   opening: OpeningText:
                     opening_single_quotes:

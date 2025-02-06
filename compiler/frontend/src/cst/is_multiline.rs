@@ -107,9 +107,17 @@ impl<D> IsMultiline for CstKind<D> {
             } => expression.is_multiline() || percent.is_multiline() || cases.is_multiline(),
             Self::MatchCase {
                 pattern,
+                condition,
                 arrow,
                 body,
-            } => pattern.is_multiline() || arrow.is_multiline() || body.is_multiline(),
+            } => {
+                pattern.is_multiline()
+                    || condition.as_deref().map_or(false, |(comma, condition)| {
+                        comma.is_multiline() || condition.is_multiline()
+                    })
+                    || arrow.is_multiline()
+                    || body.is_multiline()
+            }
             Self::Function {
                 opening_curly_brace,
                 parameters_and_arrow,

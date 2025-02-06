@@ -138,10 +138,16 @@ impl TreeWithIds for Cst {
                 .or_else(|| cases.find(id)),
             CstKind::MatchCase {
                 pattern,
+                condition,
                 arrow,
                 body,
             } => pattern
                 .find(id)
+                .or_else(|| {
+                    condition.as_deref().and_then(|(comma, condition)| {
+                        comma.find(id).or_else(|| condition.find(id))
+                    })
+                })
                 .or_else(|| arrow.find(id))
                 .or_else(|| body.find(id)),
             CstKind::Function {
@@ -329,11 +335,19 @@ impl TreeWithIds for Cst {
             ),
             CstKind::MatchCase {
                 pattern,
+                condition,
                 arrow,
                 body,
             } => (
                 pattern
                     .find_by_offset(offset)
+                    .or_else(|| {
+                        condition.as_deref().and_then(|(comma, condition)| {
+                            comma
+                                .find_by_offset(offset)
+                                .or_else(|| condition.find_by_offset(offset))
+                        })
+                    })
                     .or_else(|| arrow.find_by_offset(offset))
                     .or_else(|| body.find_by_offset(offset)),
                 false,

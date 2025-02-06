@@ -46,7 +46,11 @@ fn containing_body_of(db: &dyn HirDb, id: Id) -> Arc<Body> {
             Expression::Match { cases, .. } => {
                 let body = cases
                     .into_iter()
-                    .map(|(_, body)| body)
+                    .flat_map(
+                        |MatchCase {
+                             condition, body, ..
+                         }| condition.into_iter().chain([body]),
+                    )
                     .find(|body| body.expressions.contains_key(&id))
                     .unwrap();
                 Arc::new(body)
@@ -91,7 +95,13 @@ impl Expression {
             Self::PatternIdentifierReference(_) => {}
             Self::Match { expression, cases } => {
                 ids.push(expression.clone());
-                for (_, body) in cases {
+                for MatchCase {
+                    condition, body, ..
+                } in cases
+                {
+                    if let Some(condition) = condition {
+                        condition.collect_all_ids(ids);
+                    }
                     body.collect_all_ids(ids);
                 }
             }
@@ -386,7 +396,7 @@ pub enum Expression {
         /// Each case consists of the pattern to match against, and the body
         /// which starts with [PatternIdentifierReference]s for all identifiers
         /// in the pattern.
-        cases: Vec<(Pattern, Body)>,
+        cases: Vec<MatchCase>,
     },
     Function(Function),
     Builtin(BuiltinFunction),
@@ -437,6 +447,14 @@ impl ToRichIr for PatternIdentifierId {
         // TODO: convert to actual reference
         builder.push(self.to_string(), TokenType::Variable, EnumSet::empty());
     }
+}
+
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct MatchCase {
+    pub pattern: Pattern,
+    pub identifier_expressions: Body,
+    pub condition: Option<Body>,
+    pub body: Body,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -660,16 +678,33 @@ impl ToRichIr for Expression {
             Self::Match { expression, cases } => {
                 expression.build_rich_ir(builder);
                 builder.push(" %", None, EnumSet::empty());
-                builder.push_children_custom_multiline(cases, |builder, (pattern, body)| {
-                    pattern.build_rich_ir(builder);
-                    builder.push(" ->", None, EnumSet::empty());
-                    builder.push_indented_foldable(|builder| {
-                        if !body.expressions.is_empty() {
+                builder.push_children_custom_multiline(
+                    cases,
+                    |builder,
+                     MatchCase {
+                         pattern,
+                         condition,
+                         body,
+                         ..
+                     }| {
+                        pattern.build_rich_ir(builder);
+                        if let Some(condition) = condition {
+                            builder.push(", ", None, EnumSet::empty());
+                            builder.indent();
+                            builder.push_newline();
+                            condition.build_rich_ir(builder);
+                            builder.dedent();
                             builder.push_newline();
                         }
-                        body.build_rich_ir(builder);
-                    });
-                });
+                        builder.push(" ->", None, EnumSet::empty());
+                        builder.push_indented_foldable(|builder| {
+                            if !body.expressions.is_empty() {
+                                builder.push_newline();
+                            }
+                            body.build_rich_ir(builder);
+                        });
+                    },
+                );
             }
             Self::Function(function) => {
                 builder.push(
@@ -833,7 +868,16 @@ impl Expression {
             Self::Destructure { .. } => None,
             Self::PatternIdentifierReference { .. } => None,
             // TODO: use binary search
-            Self::Match { cases, .. } => cases.iter().find_map(|(_, body)| body.find(id)),
+            Self::Match { cases, .. } => cases.iter().find_map(
+                |MatchCase {
+                     condition, body, ..
+                 }| {
+                    condition
+                        .as_ref()
+                        .and_then(|condition| condition.find(id))
+                        .or_else(|| body.find(id))
+                },
+            ),
             Self::Function(Function { body, .. }) => body.find(id),
             Self::Builtin(_) => None,
             Self::Call { .. } => None,
@@ -873,8 +917,17 @@ impl CollectErrors for Expression {
             | Self::Struct(_)
             | Self::PatternIdentifierReference { .. } => {}
             Self::Match { cases, .. } => {
-                for (pattern, body) in cases {
+                for MatchCase {
+                    pattern,
+                    identifier_expressions: _,
+                    condition,
+                    body,
+                } in cases
+                {
                     pattern.collect_errors(errors);
+                    if let Some(condition) = condition {
+                        condition.collect_errors(errors);
+                    }
                     body.collect_errors(errors);
                 }
             }
@@ -926,6 +979,13 @@ impl CollectErrors for Body {
     fn collect_errors(&self, errors: &mut Vec<CompilerError>) {
         for (_id, expression) in &self.expressions {
             expression.collect_errors(errors);
+        }
+    }
+}
+impl<T: CollectErrors> CollectErrors for Option<T> {
+    fn collect_errors(&self, errors: &mut Vec<CompilerError>) {
+        if let Some(this) = self {
+            this.collect_errors(errors);
         }
     }
 }

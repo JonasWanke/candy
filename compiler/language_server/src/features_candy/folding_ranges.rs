@@ -137,10 +137,15 @@ where
             }
             CstKind::MatchCase {
                 pattern,
+                condition,
                 arrow,
                 body,
             } => {
                 self.visit_cst(pattern);
+
+                if let Some(box (_, condition)) = condition {
+                    self.visit_cst(condition);
+                }
 
                 let arrow = arrow.unwrap_whitespace_and_comment();
                 let body_end = body
