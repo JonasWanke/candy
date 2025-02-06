@@ -2,6 +2,7 @@ use crate::{
     ast_to_hir::TypeUnifier,
     hir::{self, BuiltinFunction, Hir, NamedType, ParameterType, Type},
     id::IdGenerator,
+    memory_layout::lay_out_memory,
     mono::{self, Mono},
     type_solver::{goals::SolverSolution, values::SolverVariable},
     utils::HashMapExtension,
@@ -33,12 +34,16 @@ impl<'h> Context<'h> {
         };
         let main_function = context.lower_function(hir.main_function_id, &FxHashMap::default());
         context.lower_function(BuiltinFunction::Panic.id(), &FxHashMap::default());
+
+        let type_declarations = context
+            .type_declarations
+            .into_iter()
+            .map(|(name, declaration)| (name, declaration.unwrap()))
+            .collect();
+        let (memory_layouts, type_declaration_order) = lay_out_memory(&type_declarations);
+
         Mono {
-            type_declarations: context
-                .type_declarations
-                .into_iter()
-                .map(|(name, declaration)| (name, declaration.unwrap()))
-                .collect(),
+            type_declarations,
             assignments: context
                 .assignments
                 .into_iter()
@@ -52,6 +57,8 @@ impl<'h> Context<'h> {
                 .into_iter()
                 .map(|(name, function)| (name, function.unwrap()))
                 .collect(),
+            memory_layouts,
+            type_declaration_order,
             main_function,
         }
     }
@@ -277,32 +284,36 @@ impl<'h> Context<'h> {
                     return mangled_name;
                 };
                 match &declaration.kind {
+                    hir::TypeDeclarationKind::Builtin(builtin_type) => {
+                        entry.insert(None);
+                        match builtin_type {
+                            hir::BuiltinType::Int => {
+                                mono::TypeDeclaration::Builtin(mono::BuiltinType::Int)
+                            }
+                            hir::BuiltinType::List => mono::TypeDeclaration::Builtin(
+                                mono::BuiltinType::List(self.lower_type(&type_arguments[0])),
+                            ),
+                            hir::BuiltinType::Text => {
+                                mono::TypeDeclaration::Builtin(mono::BuiltinType::Text)
+                            }
+                        }
+                    }
                     hir::TypeDeclarationKind::Struct { fields } => {
                         entry.insert(None);
                         let environment = hir::Type::build_environment(
                             &declaration.type_parameters,
                             type_arguments,
                         );
-                        if let Some(fields) = fields.as_ref() {
-                            let fields = fields
-                                .iter()
-                                .map(|field| {
-                                    (
-                                        field.name.clone(),
-                                        self.lower_type(&field.type_.substitute(&environment)),
-                                    )
-                                })
-                                .collect();
-                            mono::TypeDeclaration::Struct { fields }
-                        } else {
-                            mono::TypeDeclaration::Builtin {
-                                name: name.clone(),
-                                type_arguments: type_arguments
-                                    .iter()
-                                    .map(|it| self.lower_type(it))
-                                    .collect(),
-                            }
-                        }
+                        let fields = fields
+                            .iter()
+                            .map(|field| {
+                                (
+                                    field.name.clone(),
+                                    self.lower_type(&field.type_.substitute(&environment)),
+                                )
+                            })
+                            .collect();
+                        mono::TypeDeclaration::Struct { fields }
                     }
                     hir::TypeDeclarationKind::Enum { variants } => {
                         entry.insert(None);
@@ -358,7 +369,7 @@ impl<'h> Context<'h> {
                 result.push_str(&type_.name);
                 if !type_.type_arguments.is_empty() {
                     result.push_str("$of$");
-                    for type_ in type_.type_arguments.iter() {
+                    for type_ in &type_.type_arguments {
                         Self::mangle_type_helper(result, type_);
                         result.push('$');
                     }
@@ -375,7 +386,7 @@ impl<'h> Context<'h> {
                 result.push_str("$Fun$");
                 if !type_.parameter_types.is_empty() {
                     result.push_str("of$");
-                    for type_ in type_.parameter_types.iter() {
+                    for type_ in &type_.parameter_types {
                         Self::mangle_type_helper(result, type_);
                         result.push('$');
                     }
@@ -427,7 +438,7 @@ impl<'c, 'h> BodyBuilder<'c, 'h> {
             id_generator: IdGenerator::default(),
             id_mapping: FxHashMap::default(),
         };
-        builder.id_mapping = self.id_mapping.clone();
+        builder.id_mapping.clone_from(&self.id_mapping);
         builder.id_generator = mem::take(&mut self.id_generator);
 
         fun(&mut builder);

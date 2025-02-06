@@ -175,6 +175,7 @@ pub struct AstTypeParameter {
 
 // Types
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum AstType {
     Named(AstNamedType),

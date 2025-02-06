@@ -2,10 +2,9 @@
     anonymous_lifetime_in_impl_trait,
     box_patterns,
     if_let_guard,
-    iter_repeat_n,
     let_chains,
-    option_take_if,
-    try_blocks
+    try_blocks,
+    unsigned_is_multiple_of
 )]
 #![warn(clippy::nursery, clippy::pedantic, unused_crate_dependencies)]
 #![allow(
@@ -27,7 +26,10 @@ use clap::{arg, Parser, Subcommand, ValueHint};
 use error::CompilerError;
 use hir::Hir;
 use hir_to_mono::hir_to_mono;
+use itertools::Itertools;
 use mono_to_c::mono_to_c;
+use position::{Position, RangeOfOffset};
+use serde::Serialize;
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -46,6 +48,7 @@ mod error;
 mod hir;
 mod hir_to_mono;
 mod id;
+mod memory_layout;
 mod mono;
 mod mono_to_c;
 mod position;
@@ -61,6 +64,7 @@ enum CandyOptions {
     Debug(DebugOptions),
     Check(CheckOptions),
     Compile(CompileOptions),
+    ToolingAnalyze(ToolingAnalyzeOptions),
 }
 
 fn main() -> ProgramResult {
@@ -72,6 +76,10 @@ fn main() -> ProgramResult {
         CandyOptions::Debug(options) => debug(options),
         CandyOptions::Check(options) => check(options),
         CandyOptions::Compile(options) => compile(options),
+        CandyOptions::ToolingAnalyze(options) => {
+            tooling_analyze(options);
+            Ok(())
+        }
     }
 }
 pub type ProgramResult = Result<(), Exit>;
@@ -209,6 +217,66 @@ fn compile(options: CompileOptions) -> ProgramResult {
 
     info!("Done 🎉");
     Ok(())
+}
+
+#[derive(Parser, Debug)]
+struct ToolingAnalyzeOptions {
+    /// The file to analyze.
+    #[arg(value_hint = ValueHint::FilePath)]
+    path: PathBuf,
+}
+#[allow(clippy::needless_pass_by_value)]
+fn tooling_analyze(options: ToolingAnalyzeOptions) {
+    let path_str = options.path.to_string_lossy();
+    let path = path_str.strip_prefix("file:/").unwrap();
+    let source = fs::read_to_string(Path::new(path))
+        .unwrap_or_else(|err| panic!("Couldn't open file `{path}`: {err:?}"));
+
+    let (_, errors) = compile_hir(&options.path, &source);
+
+    // TODO: request file content from VS Code extension
+
+    let diagnostics = errors
+        .into_iter()
+        .map(|error| {
+            let span = error.span.to_positions(&source);
+            Diagnostic {
+                message: error.message.into_boxed_str(),
+                source: DiagnosticSource {
+                    file: error.path.to_string_lossy().into_owned().into_boxed_str(),
+                    start: span.start,
+                    end: span.end,
+                },
+            }
+        })
+        .collect_vec();
+    println!(
+        "{}",
+        serde_json::to_string(&Message::Diagnostics { diagnostics }).unwrap(),
+    );
+}
+
+#[derive(Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum Message {
+    #[allow(dead_code)]
+    ReadFile {
+        path: String,
+    },
+    Diagnostics {
+        diagnostics: Vec<Diagnostic>,
+    },
+}
+#[derive(Serialize)]
+struct Diagnostic {
+    pub message: Box<str>,
+    pub source: DiagnosticSource,
+}
+#[derive(Serialize)]
+struct DiagnosticSource {
+    pub file: Box<str>,
+    pub start: Position,
+    pub end: Position,
 }
 
 fn compile_hir(path: &Path, source: &str) -> (Hir, Vec<CompilerError>) {

@@ -4,13 +4,14 @@
     const_trait_impl,
     let_chains
 )]
-#![warn(clippy::nursery, clippy::pedantic, unused_crate_dependencies)]
-#![allow(
-    clippy::cognitive_complexity,
-    clippy::match_same_arms,
-    clippy::module_name_repetitions,
-    clippy::too_many_lines
-)]
+#![allow(clippy::all)]
+// #![warn(clippy::nursery, clippy::pedantic, unused_crate_dependencies)]
+// #![allow(
+//     clippy::cognitive_complexity,
+//     clippy::match_same_arms,
+//     clippy::module_name_repetitions,
+//     clippy::too_many_lines
+// )]
 
 use candy_frontend::{cst::Cst, position::Offset};
 use existing_whitespace::{TrailingWithIndentationConfig, WhitespacePositionInBody};

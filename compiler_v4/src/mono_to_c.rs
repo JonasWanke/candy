@@ -1,11 +1,13 @@
 use crate::{
     hir::BuiltinFunction,
+    memory_layout::TypeLayoutKind,
     mono::{
-        Body, BodyOrBuiltin, Expression, ExpressionKind, Function, Id, Lambda, Mono, Parameter,
-        TypeDeclaration,
+        Body, BodyOrBuiltin, BuiltinType, Expression, ExpressionKind, Function, Id, Lambda, Mono,
+        Parameter, TypeDeclaration,
     },
 };
 use itertools::Itertools;
+use rustc_hash::FxHashSet;
 
 pub fn mono_to_c(mono: &Mono) -> String {
     let mut context = Context::new(mono);
@@ -58,13 +60,10 @@ impl<'h> Context<'h> {
         self.lower_function_definitions();
 
         self.push("int main() {\n");
-        for name in self.mono.assignment_initialization_order.iter() {
+        for name in &self.mono.assignment_initialization_order {
             self.push(format!("{name}$init();\n"));
         }
-        self.push(format!(
-            "return {}()->value;\n}}\n",
-            self.mono.main_function,
-        ));
+        self.push(format!("return {}().value;\n}}\n", self.mono.main_function,));
     }
 
     fn lower_type_forward_declarations(&mut self) {
@@ -73,50 +72,53 @@ impl<'h> Context<'h> {
         }
     }
     fn lower_type_declarations(&mut self) {
-        for (name, declaration) in &self.mono.type_declarations {
+        for name in &self.mono.type_declaration_order {
+            let declaration = &self.mono.type_declarations[name];
             self.push(format!("struct {name} {{\n"));
             match declaration {
-                TypeDeclaration::Builtin {
-                    name,
-                    type_arguments,
-                } => {
-                    match name.as_ref() {
-                        "Int" => {
-                            assert!(type_arguments.is_empty());
+                TypeDeclaration::Builtin(builtin_type) => {
+                    match builtin_type {
+                        BuiltinType::Int => {
                             self.push("int64_t value;\n");
                         }
-                        "List" => {
-                            assert_eq!(type_arguments.len(), 1);
+                        BuiltinType::List(item_type_) => {
                             self.push("uint64_t length;\n");
-                            self.push(format!("{}** values;\n", type_arguments[0]));
+                            self.push(format!("{item_type_}* values;\n"));
                         }
-                        "Text" => {
-                            assert!(type_arguments.is_empty());
+                        BuiltinType::Text => {
                             self.push("char* value;\n");
                         }
-                        _ => panic!("Unknown builtin type: {name}"),
                     }
                     self.push("};\n");
                 }
                 TypeDeclaration::Struct { fields } => {
-                    for (name, type_) in fields.iter() {
-                        self.push(format!("{type_}* {name}; "));
+                    for (name, type_) in &**fields {
+                        self.push(format!("{type_} {name}; "));
                     }
                     self.push("};\n");
                 }
                 TypeDeclaration::Enum { variants } => {
                     if !variants.is_empty() {
                         self.push("enum {");
-                        for variant in variants.iter() {
+                        for variant in &**variants {
                             self.push(format!("{name}_{},", variant.name));
                         }
                         self.push("} variant;\n");
                     }
 
                     self.push("union {");
-                    for variant in variants.iter() {
+                    let boxed_variants = self.get_boxed_variants(name).clone();
+                    for variant in &**variants {
                         if let Some(value_type) = &variant.value_type {
-                            self.push(format!("{value_type}* {};", variant.name));
+                            self.push(format!(
+                                "{value_type}{} {};",
+                                if boxed_variants.contains(&*variant.name) {
+                                    "*"
+                                } else {
+                                    ""
+                                },
+                                variant.name,
+                            ));
                         }
                     }
                     self.push("} value;\n};\n");
@@ -126,9 +128,9 @@ impl<'h> Context<'h> {
                     return_type,
                 } => {
                     self.push("void* closure;\n");
-                    self.push(format!("{return_type}* (*function)(void*"));
-                    for parameter_type in parameter_types.iter() {
-                        self.push(format!(", {parameter_type}*"));
+                    self.push(format!("{return_type} (*function)(void*"));
+                    for parameter_type in &**parameter_types {
+                        self.push(format!(", {parameter_type}"));
                     }
                     self.push(");\n");
                     self.push("};\n");
@@ -136,11 +138,18 @@ impl<'h> Context<'h> {
             }
         }
     }
+    fn get_boxed_variants(&self, enum_type: &str) -> &FxHashSet<Box<str>> {
+        let TypeLayoutKind::Enum { boxed_variants, .. } = &self.mono.memory_layouts[enum_type].kind
+        else {
+            panic!("Not an enum type: `{enum_type}`");
+        };
+        boxed_variants
+    }
 
     fn lower_assignment_declarations(&mut self) {
         for (name, assignment) in &self.mono.assignments {
             self.lower_lambda_declarations_in(name, &assignment.body);
-            self.push(format!("{}* {name};\n", &assignment.type_));
+            self.push(format!("{} {name};\n", &assignment.type_));
         }
     }
     fn lower_assignment_definitions(&mut self) {
@@ -199,7 +208,7 @@ impl<'h> Context<'h> {
 
             self.push(format!("struct {declaration_name}$lambda{id}_closure {{"));
             for (id, type_) in &closure {
-                self.push(format!("{type_}* {id}; "));
+                self.push(format!("{type_} {id}; "));
             }
             self.push("};\n");
 
@@ -209,29 +218,29 @@ impl<'h> Context<'h> {
                 "{declaration_name}$lambda{id}_closure* closure = raw_closure;\n"
             ));
             for (id, type_) in &closure {
-                self.push(format!("{type_}* {id} = closure->{id};\n"));
+                self.push(format!("{type_} {id} = closure->{id};\n"));
             }
             self.lower_body(declaration_name, &lambda.body);
             self.push("}\n");
         });
     }
     fn lower_function_signature(&mut self, name: &str, function: &Function) {
-        self.push(format!("{}* {name}(", &function.return_type));
+        self.push(format!("{} {name}(", &function.return_type));
         for (index, parameter) in function.parameters.iter().enumerate() {
             if index > 0 {
                 self.push(", ");
             }
-            self.push(format!("{}* {}", &parameter.type_, parameter.id));
+            self.push(format!("{} {}", &parameter.type_, parameter.id));
         }
         self.push(")");
     }
     fn lower_lambda_signature(&mut self, declaration_name: &str, id: Id, lambda: &Lambda) {
         self.push(format!(
-            "{}* {declaration_name}$lambda{id}_function(void* raw_closure",
+            "{} {declaration_name}$lambda{id}_function(void* raw_closure",
             &lambda.body.return_type()
         ));
-        for parameter in lambda.parameters.iter() {
-            self.push(format!(", {}* {}", &parameter.type_, parameter.id));
+        for parameter in &lambda.parameters {
+            self.push(format!(", {} {}", &parameter.type_, parameter.id));
         }
         self.push(")");
     }
@@ -249,7 +258,7 @@ impl<'h> Context<'h> {
                 | ExpressionKind::CallFunction { .. }
                 | ExpressionKind::CallLambda { .. } => {}
                 ExpressionKind::Switch { cases, .. } => {
-                    for case in cases.iter() {
+                    for case in &**cases {
                         Self::visit_lambdas_inside_body(&case.body, visitor);
                     }
                 }
@@ -271,157 +280,144 @@ impl<'h> Context<'h> {
                 match builtin_function {
                     BuiltinFunction::IntAdd => self.push(format!(
                         "\
-                        Int* result_pointer = malloc(sizeof(Int));
-                        result_pointer->value = {a}->value + {b}->value;
-                        return result_pointer;",
+                        Int result = {{.value = {a}.value + {b}.value}};
+                        return result;",
                         a = function.parameters[0].id,
                         b = function.parameters[1].id,
                     )),
                     BuiltinFunction::IntBitwiseAnd => self.push(format!(
                         "\
-                        Int* result_pointer = malloc(sizeof(Int));
-                        result_pointer->value = {a}->value & {b}->value;
-                        return result_pointer;",
+                        Int result = {{.value = {a}.value & {b}.value}};
+                        return result;",
                         a = function.parameters[0].id,
                         b = function.parameters[1].id,
                     )),
                     BuiltinFunction::IntBitwiseOr => self.push(format!(
                         "\
-                        Int* result_pointer = malloc(sizeof(Int));
-                        result_pointer->value = {a}->value | {b}->value;
-                        return result_pointer;",
+                        Int result = {{.value = {a}.value | {b}.value}};
+                        return result;",
                         a = function.parameters[0].id,
                         b = function.parameters[1].id,
                     )),
                     BuiltinFunction::IntBitwiseXor => self.push(format!(
                         "\
-                        Int* result_pointer = malloc(sizeof(Int));
-                        result_pointer->value = {a}->value ^ {b}->value;
-                        return result_pointer;",
+                        Int result = {{.value = {a}.value ^ {b}.value}};
+                        return result;",
                         a = function.parameters[0].id,
                         b = function.parameters[1].id,
                     )),
                     BuiltinFunction::IntCompareTo => self.push(format!(
                         "\
-                        Ordering* result_pointer = malloc(sizeof(Ordering));
-                        result_pointer->variant = {a}->value < {b}->value    ? Ordering_less
-                                                  : {a}->value == {b}->value ? Ordering_equal
-                                                                             : Ordering_greater;
-                        return result_pointer;",
+                        Ordering result = {{.variant = {a}.value < {b}.value    ? Ordering_less
+                                                      : {a}.value == {b}.value ? Ordering_equal
+                                                                               : Ordering_greater}};
+                        return result;",
                         a = function.parameters[0].id,
                         b = function.parameters[1].id,
                     )),
                     BuiltinFunction::IntDivideTruncating => self.push(format!(
                         "\
-                        Int* result_pointer = malloc(sizeof(Int));
-                        result_pointer->value = {dividend}->value / {divisor}->value;
-                        return result_pointer;",
+                        Int result = {{.value = {dividend}.value / {divisor}.value}};
+                        return result;",
                         dividend = function.parameters[0].id,
                         divisor = function.parameters[1].id,
                     )),
                     BuiltinFunction::IntMultiply => self.push(format!(
                         "\
-                        Int* result_pointer = malloc(sizeof(Int));
-                        result_pointer->value = {factorA}->value * {factorB}->value;
-                        return result_pointer;",
+                        Int result = {{.value = {factorA}.value * {factorB}.value}};
+                        return result;",
                         factorA = function.parameters[0].id,
                         factorB = function.parameters[1].id,
                     )),
                     BuiltinFunction::IntParse => self.push(format!(
                         "\
-                        {return_type}* result_pointer = malloc(sizeof({return_type}));
+                        {return_type} result;
                         char *end_pointer;
                         errno = 0;
-                        uint64_t value = strtol({text}->value, &end_pointer, 10);
+                        uint64_t value = strtol({text}.value, &end_pointer, 10);
                         if (errno == ERANGE) {{
-                            result_pointer->variant = {return_type}_error;
-                            result_pointer->value.error = malloc(sizeof(Text));
-                            result_pointer->value.error->value = \"Value is out of range.\";
-                        }} else if (end_pointer == {text}->value) {{
-                            result_pointer->variant = {return_type}_error;
-                            result_pointer->value.error = malloc(sizeof(Text));
-                            result_pointer->value.error->value = \"Text is empty.\";
+                            result = {{
+                                .variant = {return_type}_error,
+                                .value.error = {{.value = \"Value is out of range.\"}},
+                            }};
+                        }} else if (end_pointer == {text}.value) {{
+                            result = {{
+                                .variant = {return_type}_error,
+                                .value.error = {{.value = \"Text is empty.\"}},
+                            }};
                         }} else if (*end_pointer != '\\0') {{
                             char* message_format = \"Non-numeric character \\\"%c\\\" at index %ld.\";
-                            int length = snprintf(NULL, 0, message_format, *end_pointer, end_pointer - {text}->value);
+                            int length = snprintf(NULL, 0, message_format, *end_pointer, end_pointer - {text}.value);
                             char *message = malloc(length + 1);
-                            snprintf(message, length + 1, message_format, *end_pointer, end_pointer - {text}->value);
-                        
-                            result_pointer->variant = {return_type}_error;
-                            result_pointer->value.error = malloc(sizeof(Text));
-                            result_pointer->value.error->value = message;
+                            snprintf(message, length + 1, message_format, *end_pointer, end_pointer - {text}.value);
+                            result = {{
+                                .variant = {return_type}_error,
+                                .value.error = {{.value = message}},
+                            }};
                         }} else {{
-                            result_pointer->variant = {return_type}_ok;
-                            result_pointer->value.ok = malloc(sizeof(Int));
-                            result_pointer->value.ok ->value = value;
+                            result = {{
+                                .variant = {return_type}_ok,
+                                .value.ok = {{.value = value}},
+                            }};
                         }}
-                        return result_pointer;",
+                        return result;",
                         text = function.parameters[0].id,
                         return_type = function.return_type,
                     )),
                     BuiltinFunction::IntRemainder => self.push(format!(
                         "\
-                        Int* result_pointer = malloc(sizeof(Int));
-                        result_pointer->value = {dividend}->value % {divisor}->value;
-                        return result_pointer;",
+                        Int result = {{.value = {dividend}.value % {divisor}.value}};
+                        return result;",
                         dividend = function.parameters[0].id,
                         divisor = function.parameters[1].id,
                     )),
                     BuiltinFunction::IntShiftLeft => self.push(format!(
                         "\
-                        Int* result_pointer = malloc(sizeof(Int));
-                        result_pointer->value = {value}->value << {amount}->value;
-                        return result_pointer;",
+                        Int result = {{.value = {value}.value << {amount}.value}};
+                        return result;",
                         value = function.parameters[0].id,
                         amount = function.parameters[1].id,
                     )),
                     BuiltinFunction::IntShiftRight => self.push(format!(
                         "\
-                        Int* result_pointer = malloc(sizeof(Int));
-                        result_pointer->value = {value}->value >> {amount}->value;
-                        return result_pointer;",
+                        Int result = {{.value = {value}.value >> {amount}.value}};
+                        return result;",
                         value = function.parameters[0].id,
                         amount = function.parameters[1].id,
                     )),
                     BuiltinFunction::IntSubtract => self.push(format!(
                         "\
-                        Int* result_pointer = malloc(sizeof(Int));
-                        result_pointer->value = {minuend}->value - {subtrahend}->value;
-                        return result_pointer;",
+                        Int result = {{.value = {minuend}.value - {subtrahend}.value}};
+                        return result;",
                         minuend = function.parameters[0].id,
                         subtrahend = function.parameters[1].id,
                     )),
                     BuiltinFunction::IntToText => self.push(format!(
                         "\
-                        int length = snprintf(NULL, 0, \"%ld\", {int}->value);
-                        char* result = malloc(length + 1);
-                        snprintf(result, length + 1, \"%ld\", {int}->value);
-
-                        Text* result_pointer = malloc(sizeof(Text));
-                        result_pointer->value = result;
-                        return result_pointer;",
+                        int length = snprintf(NULL, 0, \"%ld\", {int}.value);
+                        Text result = {{.value = malloc(length + 1)}};
+                        snprintf(result.value, length + 1, \"%ld\", {int}.value);
+                        return result;",
                         int = function.parameters[0].id,
                     )),
                     BuiltinFunction::ListFilled => self.push(format!(
                         "\
-                        if ({length}->value < 0) {{
+                        if ({length}.value < 0) {{
                             char* message_format = \"List length must not be negative; was %ld.\";
-                            int length = snprintf(NULL, 0, message_format, {length}->value);
-                            char *message = malloc(length + 1);
-                            snprintf(message, length + 1, message_format, {length}->value);
-
-                            Text *message_pointer = malloc(sizeof(Text));
-                            message_pointer->value = message;
-                            builtinPanic$$Text(message_pointer);
+                            int length = snprintf(NULL, 0, message_format, {length}.value);
+                            Text message = {{.value = malloc(length + 1)}};
+                            snprintf(message.value, length + 1, message_format, {length}.value);
+                            builtinPanic$$Text(message);
                         }}
 
-                        {list_type}* result_pointer = malloc(sizeof({list_type}));
-                        result_pointer->length = {length}->value;
-                        result_pointer->values = malloc({length}->value * sizeof({item_type}*));
-                        for (uint64_t i = 0; i < {length}->value; i++) {{
-                            result_pointer->values[i] = {item};
+                        {list_type} result = {{
+                            length = {length}.value,
+                            values = malloc({length}.value * sizeof({item_type})),
+                        }};
+                        for (uint64_t i = 0; i < {length}.value; i++) {{
+                            result.values[i] = {item};
                         }}
-                        return result_pointer;",
+                        return result;",
                         item_type = substitutions["T"],
                         list_type = function.return_type,
                         length = function.parameters[0].id,
@@ -429,26 +425,23 @@ impl<'h> Context<'h> {
                     )),
                     BuiltinFunction::ListGenerate => self.push(format!(
                         "\
-                        if ({length}->value < 0) {{
+                        if ({length}.value < 0) {{
                             char* message_format = \"List length must not be negative; was %ld.\";
-                            int length = snprintf(NULL, 0, message_format, {length}->value);
-                            char *message = malloc(length + 1);
-                            snprintf(message, length + 1, message_format, {length}->value);
-
-                            Text *message_pointer = malloc(sizeof(Text));
-                            message_pointer->value = message;
-                            builtinPanic$$Text(message_pointer);
+                            int length = snprintf(NULL, 0, message_format, {length}.value);
+                            Text message = {{.value = malloc(length + 1)}};
+                            snprintf(message.value, length + 1, message_format, {length}.value);
+                            builtinPanic$$Text(message);
                         }}
 
-                        {list_type}* result_pointer = malloc(sizeof({list_type}));
-                        result_pointer->length = {length}->value;
-                        result_pointer->values = malloc({length}->value * sizeof({item_type}*));
-                        for (uint64_t i = 0; i < {length}->value; i++) {{
-                            Int* index = malloc(sizeof(Int));
-                            index->value = i;
-                            result_pointer->values[i] = {item_getter}->function({item_getter}->closure, index);
+                        {list_type} result = {{
+                            .length = {length}.value,
+                            .values = malloc({length}.value * sizeof({item_type}*)),
+                        }};
+                        for (uint64_t i = 0; i < {length}.value; i++) {{
+                            Int index = {{.value = i}};
+                            result.values[i] = {item_getter}.function({item_getter}.closure, index);
                         }}
-                        return result_pointer;",
+                        return result;",
                         item_type = substitutions["T"],
                         list_type = function.return_type,
                         length = function.parameters[0].id,
@@ -456,38 +449,39 @@ impl<'h> Context<'h> {
                     )),
                     BuiltinFunction::ListGet => self.push(format!(
                         "\
-                        {return_type}* result_pointer = malloc(sizeof({return_type}));
-                        if (0 <= {index}->value && {index}->value < {list}->length) {{
-                            result_pointer->variant = {return_type}_some;
-                            result_pointer->value.some = {list}->values[{index}->value];
+                        {return_type} result = malloc(sizeof({return_type}));
+                        if (0 <= {index}.value && {index}.value < {list}.length) {{
+                            result = {{
+                                .variant = {return_type}_some,
+                                .value.some = {list}.values[{index}.value],
+                            }};
                         }} else {{
-                            result_pointer->variant = {return_type}_none;
+                            result = {{.variant = {return_type}_none}};
                         }}
-                        return result_pointer;",
+                        return result;",
                         return_type = function.return_type,
                         list = function.parameters[0].id,
                         index = function.parameters[1].id,
                     )),
                     BuiltinFunction::ListInsert => self.push(format!(
                         "\
-                        if (0 > {index}->value || {index}->value > {list}->length) {{
+                        if (0 > {index}.value || {index}.value > {list}.length) {{
                             char* message_format = \"Index out of bounds: Tried inserting at index %ld in list of length %ld.\";
-                            int length = snprintf(NULL, 0, message_format, {index}->value, {list}->length);
-                            char *message = malloc(length + 1);
-                            snprintf(message, length + 1, message_format, {index}->value, {list}->length);
-
-                            Text *message_pointer = malloc(sizeof(Text));
-                            message_pointer->value = message;
-                            builtinPanic$$Text(message_pointer);
+                            int length = snprintf(NULL, 0, message_format, {index}.value, {list}.length);
+                            Text message = {{.value = malloc(length + 1)}};
+                            snprintf(message.value, length + 1, message_format, {index}.value, {list}.length);
+                            builtinPanic$$Text(message);
                         }}
 
-                        {list_type}* result_pointer = malloc(sizeof({list_type}));
-                        result_pointer->length = {list}->length + 1;
-                        result_pointer->values = malloc(result_pointer->length * sizeof({item_type}*));
-                        memcpy(result_pointer->values, {list}->values, {index}->value * sizeof({item_type}*));
-                        result_pointer->values[{index}->value] = {item};
-                        memcpy(result_pointer->values + {index}->value + 1, {list}->values + {index}->value, ({list}->length - {index}->value) * sizeof({item_type}));
-                        return result_pointer;",
+                        uint64_t length = {list}.length + 1;
+                        {list_type} result = {{
+                            .length = length,
+                            .values = malloc(length * sizeof({item_type})),
+                        }};
+                        memcpy(result.values, {list}.values, {index}.value * sizeof({item_type}*));
+                        result.values[{index}.value] = {item};
+                        memcpy(result.values + {index}.value + 1, {list}.values + {index}.value, ({list}.length - {index}.value) * sizeof({item_type}));
+                        return result;",
                         item_type = substitutions["T"],
                         list_type = function.return_type,
                         list = function.parameters[0].id,
@@ -496,38 +490,40 @@ impl<'h> Context<'h> {
                     )),
                     BuiltinFunction::ListLength => self.push(format!(
                         "\
-                        Int* result_pointer = malloc(sizeof(Int));
-                        result_pointer->value = {list}->length;
-                        return result_pointer;",
+                        Int result = {{.value = {list}.length}};
+                        return result;",
                         list = function.parameters[0].id,
                     )),
                     BuiltinFunction::ListOf0 => self.push(format!(
                         "\
-                        {list_type}* result_pointer = malloc(sizeof({list_type}));
-                        result_pointer->length = 0;
-                        result_pointer->values = NULL;
-                        return result_pointer;",
+                        {list_type} result = {{
+                            .length = 0,
+                            .values = NULL,
+                        }};
+                        return result;",
                         list_type = function.return_type,
                     )),
                     BuiltinFunction::ListOf1 => self.push(format!(
                         "\
-                        {list_type}* result_pointer = malloc(sizeof({list_type}));
-                        result_pointer->length = 1;
-                        result_pointer->values = malloc(sizeof({item_type}*));
-                        result_pointer->values[0] = {item0};
-                        return result_pointer;",
+                        {list_type} result = {{
+                            .length = 1,
+                            .values = malloc(sizeof({item_type})),
+                        }};
+                        result.values[0] = {item0};
+                        return result;",
                         item_type = substitutions["T"],
                         list_type = function.return_type,
                         item0 = function.parameters[0].id,
                     )),
                     BuiltinFunction::ListOf2 => self.push(format!(
                         "\
-                        {list_type}* result_pointer = malloc(sizeof({list_type}));
-                        result_pointer->length = 2;
-                        result_pointer->values = malloc(2 * sizeof({item_type}*));
-                        result_pointer->values[0] = {item0};
-                        result_pointer->values[1] = {item1};
-                        return result_pointer;",
+                        {list_type} result = {{
+                            .length = 2,
+                            .values = malloc(2 * sizeof({item_type})),
+                        }};
+                        result.values[0] = {item0};
+                        result.values[1] = {item1};
+                        return result;",
                         item_type = substitutions["T"],
                         list_type = function.return_type,
                         item0 = function.parameters[0].id,
@@ -535,13 +531,14 @@ impl<'h> Context<'h> {
                     )),
                     BuiltinFunction::ListOf3 => self.push(format!(
                         "\
-                        {list_type}* result_pointer = malloc(sizeof({list_type}));
-                        result_pointer->length = 3;
-                        result_pointer->values = malloc(3 * sizeof({item_type}*));
-                        result_pointer->values[0] = {item0};
-                        result_pointer->values[1] = {item1};
-                        result_pointer->values[2] = {item2};
-                        return result_pointer;",
+                        {list_type} result = {{
+                            .length = 3,
+                            .values = malloc(3 * sizeof({item_type})),
+                        }};
+                        result.values[0] = {item0};
+                        result.values[1] = {item1};
+                        result.values[2] = {item2};
+                        return result;",
                         item_type = substitutions["T"],
                         list_type = function.return_type,
                         item0 = function.parameters[0].id,
@@ -550,14 +547,15 @@ impl<'h> Context<'h> {
                     )),
                     BuiltinFunction::ListOf4 => self.push(format!(
                         "\
-                        {list_type}* result_pointer = malloc(sizeof({list_type}));
-                        result_pointer->length = 4;
-                        result_pointer->values = malloc(4 * sizeof({item_type}*));
-                        result_pointer->values[0] = {item0};
-                        result_pointer->values[1] = {item1};
-                        result_pointer->values[2] = {item2};
-                        result_pointer->values[3] = {item3};
-                        return result_pointer;",
+                        {list_type} result = {{
+                            .length = 4,
+                            .values = malloc(4 * sizeof({item_type})),
+                        }};
+                        result.values[0] = {item0};
+                        result.values[1] = {item1};
+                        result.values[2] = {item2};
+                        result.values[3] = {item3};
+                        return result;",
                         item_type = substitutions["T"],
                         list_type = function.return_type,
                         item0 = function.parameters[0].id,
@@ -567,15 +565,16 @@ impl<'h> Context<'h> {
                     )),
                     BuiltinFunction::ListOf5 => self.push(format!(
                         "\
-                        {list_type}* result_pointer = malloc(sizeof({list_type}));
-                        result_pointer->length = 5;
-                        result_pointer->values = malloc(5 * sizeof({item_type}*));
-                        result_pointer->values[0] = {item0};
-                        result_pointer->values[1] = {item1};
-                        result_pointer->values[2] = {item2};
-                        result_pointer->values[3] = {item3};
-                        result_pointer->values[4] = {item4};
-                        return result_pointer;",
+                        {list_type} result = {{
+                            .length = 5,
+                            .values = malloc(5 * sizeof({item_type})),
+                        }};
+                        result.values[0] = {item0};
+                        result.values[1] = {item1};
+                        result.values[2] = {item2};
+                        result.values[3] = {item3};
+                        result.values[4] = {item4};
+                        return result;",
                         item_type = substitutions["T"],
                         list_type = function.return_type,
                         item0 = function.parameters[0].id,
@@ -586,23 +585,22 @@ impl<'h> Context<'h> {
                     )),
                     BuiltinFunction::ListRemoveAt => self.push(format!(
                         "\
-                        if (0 > {index}->value || {index}->value >= {list}->length) {{
+                        if (0 > {index}.value || {index}.value >= {list}.length) {{
                             char* message_format = \"Index out of bounds: Tried removing item at index %ld from list of length %ld.\";
-                            int length = snprintf(NULL, 0, message_format, {index}->value, {list}->length);
-                            char *message = malloc(length + 1);
-                            snprintf(message, length + 1, message_format, {index}->value, {list}->length);
-
-                            Text *message_pointer = malloc(sizeof(Text));
-                            message_pointer->value = message;
-                            builtinPanic$$Text(message_pointer);
+                            int length = snprintf(NULL, 0, message_format, {index}.value, {list}.length);
+                            Text message = {{.value = malloc(length + 1)}};
+                            snprintf(message.value, length + 1, message_format, {index}.value, {list}.length);
+                            builtinPanic$$Text(message);
                         }}
 
-                        {list_type}* result_pointer = malloc(sizeof({list_type}));
-                        result_pointer->length = {list}->length - 1;
-                        result_pointer->values = malloc(result_pointer->length * sizeof({item_type}*));
-                        memcpy(result_pointer->values, {list}->values, {index}->value * sizeof({item_type}*));
-                        memcpy(result_pointer->values + {index}->value, {list}->values + {index}->value + 1, ({list}->length - {index}->value - 1) * sizeof({item_type}*));
-                        return result_pointer;",
+                        uint64_t length = {list}.length - 1;
+                        {list_type} result = {{
+                            .length = length,
+                            .values = malloc(length * sizeof({item_type})),
+                        }};
+                        memcpy(result.values, {list}.values, {index}.value * sizeof({item_type}*));
+                        memcpy(result.values + {index}.value, {list}.values + {index}.value + 1, ({list}.length - {index}.value - 1) * sizeof({item_type}*));
+                        return result;",
                         item_type = substitutions["T"],
                         list_type = function.return_type,
                         list = function.parameters[0].id,
@@ -610,23 +608,21 @@ impl<'h> Context<'h> {
                     )),
                     BuiltinFunction::ListReplace => self.push(format!(
                         "\
-                        if (0 > {index}->value || {index}->value >= {list}->length) {{
+                        if (0 > {index}.value || {index}.value >= {list}.length) {{
                             char* message_format = \"Index out of bounds: Tried replacing index %ld in list of length %ld.\";
-                            int length = snprintf(NULL, 0, message_format, {index}->value, {list}->length);
-                            char *message = malloc(length + 1);
-                            snprintf(message, length + 1, message_format, {index}->value, {list}->length);
-
-                            Text *message_pointer = malloc(sizeof(Text));
-                            message_pointer->value = message;
-                            builtinPanic$$Text(message_pointer);
+                            int length = snprintf(NULL, 0, message_format, {index}.value, {list}.length);
+                            Text message = {{.value = malloc(length + 1)}};
+                            snprintf(message.value, length + 1, message_format, {index}.value, {list}.length);
+                            builtinPanic$$Text(message);
                         }}
 
-                        {list_type}* result_pointer = malloc(sizeof({list_type}));
-                        result_pointer->length = {list}->length;
-                        result_pointer->values = malloc(result_pointer->length * sizeof({item_type}*));
-                        memcpy(result_pointer->values, {list}->values, {list}->length * sizeof({item_type}*));
-                        result_pointer->values[{index}->value] = {new_item};
-                        return result_pointer;",
+                        {list_type} result = {{
+                            .length = {list}.length,
+                            .values = malloc({list}.length * sizeof({item_type})),
+                        }};
+                        memcpy(result.values, {list}.values, {list}.length * sizeof({item_type}*));
+                        result.values[{index}.value] = {new_item};
+                        return result;",
                         item_type = substitutions["T"],
                         list_type = function.return_type,
                         list = function.parameters[0].id,
@@ -636,7 +632,7 @@ impl<'h> Context<'h> {
                     BuiltinFunction::Panic => {
                         self.push(format!(
                             "\
-                            fputs({}->value, stderr);
+                            fputs({}.value, stderr);
                             exit(1);",
                             function.parameters[0].id,
                         ));
@@ -644,90 +640,80 @@ impl<'h> Context<'h> {
                     BuiltinFunction::Print => {
                         self.push(format!(
                             "\
-                            puts({}->value);
-                            Nothing *_1 = malloc(sizeof(Nothing));
+                            puts({}.value);
+                            Nothing _1 = {{}};
                             return _1;",
                             function.parameters[0].id,
                         ));
                     }
                     BuiltinFunction::TextCompareTo => self.push(format!(
                         "\
-                        int raw_result = strcmp({a}->value, {b}->value);
-                        Ordering* result_pointer = malloc(sizeof(Ordering));
-                        result_pointer->variant = raw_result < 0    ? Ordering_less
-                                                  : raw_result == 0 ? Ordering_equal
-                                                                    : Ordering_greater;
-                        return result_pointer;",
+                        int raw_result = strcmp({a}.value, {b}.value);
+                        Ordering result = {{.variant = raw_result < 0    ? Ordering_less
+                                                    : raw_result == 0 ? Ordering_equal
+                                                                      : Ordering_greater}};
+                        return result;",
                         a = function.parameters[0].id,
                         b = function.parameters[1].id,
                     )),
                     BuiltinFunction::TextConcat => self.push(format!(
                         "\
-                        size_t lengthA = strlen({a}->value);\n\
-                        size_t lengthB = strlen({b}->value);\n\
-                        char* result = malloc(lengthA + lengthB + 1);\n\
-                        memcpy(result, {a}->value, lengthA);\n\
-                        memcpy(result + lengthA, {b}->value, lengthB + 1);\n\
-                        Text* result_pointer = malloc(sizeof(Text));
-                        result_pointer->value = result;
-                        return result_pointer;",
+                        size_t lengthA = strlen({a}.value);\n\
+                        size_t lengthB = strlen({b}.value);\n\
+                        Text result = {{.value = malloc(lengthA + lengthB + 1)}};\n\
+                        memcpy(result.value, {a}.value, lengthA);\n\
+                        memcpy(result.value + lengthA, {b}.value, lengthB + 1);\n\
+                        return result;",
                         a = function.parameters[0].id,
                         b = function.parameters[1].id,
                     )),
                     BuiltinFunction::TextGetRange => self.push(format!(
                         "\
-                        size_t text_length = strlen({text}->value);
-                        if (0 > {start_inclusive}->value || {start_inclusive}->value > text_length
-                            || 0 > {end_exclusive}->value || {end_exclusive}->value > text_length) {{
+                        size_t text_length = strlen({text}.value);
+                        if (0 > {start_inclusive}.value || {start_inclusive}.value > text_length
+                            || 0 > {end_exclusive}.value || {end_exclusive}.value > text_length) {{
                             char* message_format = \"Index out of bounds: Tried getting range %ld..%ld from text that is only %ld long.\";
-                            int length = snprintf(NULL, 0, message_format, {start_inclusive}->value, {end_exclusive}->value, text_length);
-                            char *message = malloc(length + 1);
-                            snprintf(message, length + 1, message_format, {start_inclusive}->value, {end_exclusive}->value, text_length);
-                            Text *message_pointer = malloc(sizeof(Text));
-                            message_pointer->value = message;
-                            builtinPanic$$Text(message_pointer);
-                        }} else if ({start_inclusive}->value > {end_exclusive}->value) {{
+                            int length = snprintf(NULL, 0, message_format, {start_inclusive}.value, {end_exclusive}.value, text_length);
+                            Text message = {{.value = malloc(length + 1)}};
+                            snprintf(message.value, length + 1, message_format, {start_inclusive}.value, {end_exclusive}.value, text_length);
+                            builtinPanic$$Text(message);
+                        }} else if ({start_inclusive}.value > {end_exclusive}.value) {{
                             char* message_format = \"Invalid range %ld..%ld: `start_inclusive` must be less than or equal to `end_exclusive`.\";
-                            int length = snprintf(NULL, 0, message_format, {start_inclusive}->value, {end_exclusive}->value);
-                            char *message = malloc(length + 1);
-                            snprintf(message, length + 1, message_format, {start_inclusive}->value, {end_exclusive}->value);
-                            Text *message_pointer = malloc(sizeof(Text));
-                            message_pointer->value = message;
-                            builtinPanic$$Text(message_pointer);
+                            int length = snprintf(NULL, 0, message_format, {start_inclusive}.value, {end_exclusive}.value);
+                            Text message = {{.value = malloc(length + 1)}};
+                            snprintf(message.value, length + 1, message_format, {start_inclusive}.value, {end_exclusive}.value);
+                            builtinPanic$$Text(message);
                         }}
 
-                        size_t length = {end_exclusive}->value - {start_inclusive}->value;\n\
-                        char* result = malloc(length + 1);\n\
-                        memcpy(result, {text}->value + {start_inclusive}->value, length);\n\
-                        Text* result_pointer = malloc(sizeof(Text));
-                        result_pointer->value = result;
-                        return result_pointer;",
+                        size_t length = {end_exclusive}.value - {start_inclusive}.value;\n\
+                        Text result = {{.value = malloc(length + 1)}};\n\
+                        memcpy(result.value, {text}.value + {start_inclusive}.value, length);\n\
+                        return result;",
                         text = function.parameters[0].id,
                         start_inclusive = function.parameters[1].id,
                         end_exclusive = function.parameters[2].id,
                     )),
                     BuiltinFunction::TextIndexOf => self.push(format!(
                         "\
-                        {return_type}* result_pointer = malloc(sizeof({return_type}));
-                        char* result = strstr({a}->value, {b}->value);
-                        if (result == NULL) {{
-                            result_pointer->variant = {return_type}_none;
+                        {return_type} result;
+                        char* result_raw = strstr({a}.value, {b}.value);
+                        if (result_raw == NULL) {{
+                            result = {{.variant = {return_type}_none}};
                         }} else {{
-                            result_pointer->variant = {return_type}_some;
-                            Int* index_pointer = malloc(sizeof(Int));
-                            index_pointer->value = result - {a}->value;
-                            result_pointer->value.some = index_pointer;
+                            result = {{
+                                .variant = {return_type}_some,
+                                .value.some = {{.value = result_raw - {a}.value}},
+                            }};
                         }}
-                        return result_pointer;",
+                        return result;",
                         a = function.parameters[0].id,
                         b = function.parameters[1].id,
                         return_type = function.return_type,
                     )),
                     BuiltinFunction::TextLength => self.push(format!(
                         "\
-                        Int* result_pointer = malloc(sizeof(Int));
-                        result_pointer->value = strlen({text}->value);
-                        return result_pointer;",
+                        Int result = {{.value = strlen({text}.value)}};
+                        return result;",
                         text = function.parameters[0].id,
                     )),
                 }
@@ -755,18 +741,14 @@ impl<'h> Context<'h> {
     fn lower_expression(&mut self, declaration_name: &str, id: Id, expression: &Expression) {
         match &expression.kind {
             ExpressionKind::Int(int) => {
-                self.push(format!(
-                    "{}* {id} = malloc(sizeof({}));",
-                    &expression.type_, &expression.type_,
-                ));
-                self.push(format!("{id}->value = {int};"));
+                self.push(format!("{} {id} = {{.value = {int} }};", &expression.type_));
             }
             ExpressionKind::Text(text) => {
                 self.push(format!(
-                    "{}* {id} = malloc(sizeof({}));",
-                    &expression.type_, &expression.type_,
+                    "{} {id} = {{.value = \"{}\"}};",
+                    &expression.type_,
+                    text.escape_default(),
                 ));
-                self.push(format!("{id}->value = \"{}\";", text.escape_default()));
             }
             ExpressionKind::CreateStruct { struct_, fields } => {
                 let TypeDeclaration::Struct {
@@ -776,42 +758,66 @@ impl<'h> Context<'h> {
                     unreachable!();
                 };
 
-                self.push(format!(
-                    "{}* {id} = malloc(sizeof({}));",
-                    &expression.type_, &expression.type_,
-                ));
+                self.push(format!("{} {id} = {{", &expression.type_));
                 for ((name, _), value) in type_fields.iter().zip_eq(fields.iter()) {
-                    self.push(format!("\n{id}->{name} = {value};"));
+                    self.push(format!("\n.{name} = {value},"));
                 }
+                self.push("};");
             }
             ExpressionKind::StructAccess { struct_, field } => {
-                self.push(format!("{}* {id} = {struct_}->{field};", &expression.type_));
+                self.push(format!("{} {id} = {struct_}.{field};", &expression.type_));
             }
             ExpressionKind::CreateEnum {
                 enum_,
                 variant,
                 value,
             } => {
-                self.push(format!(
-                    "{}* {id} = malloc(sizeof({}));",
-                    &expression.type_, &expression.type_,
-                ));
-                self.push(format!("{id}->variant = {enum_}_{variant};"));
-                if let Some(value) = value {
-                    self.push(format!("\n{id}->value.{variant} = {value};"));
+                if self.get_boxed_variants(enum_).contains(variant) {
+                    let TypeDeclaration::Enum { variants } = &self.mono.type_declarations[enum_]
+                    else {
+                        unreachable!()
+                    };
+                    let value_type = variants
+                        .iter()
+                        .find(|it| &it.name == variant)
+                        .as_ref()
+                        .unwrap()
+                        .value_type
+                        .as_ref()
+                        .unwrap();
+                    self.push(format!(
+                        "\
+                        {value_type}* {id}_value_boxed = malloc(sizeof({value_type}*));
+                        *{id}_value_boxed = {value};
+                        {type_} {id} = {{
+                            .variant = {enum_}_{variant},
+                            .value.{variant} = {id}_value_boxed,
+                        }};",
+                        value = value.unwrap(),
+                        type_ = &expression.type_,
+                    ));
+                } else {
+                    self.push(format!(
+                        "{} {id} = {{.variant = {enum_}_{variant}",
+                        &expression.type_,
+                    ));
+                    if let Some(value) = value {
+                        self.push(format!("\n.value.{variant} = {value};"));
+                    }
+                    self.push("};");
                 }
             }
             ExpressionKind::GlobalAssignmentReference(assignment) => {
-                self.push(format!("{}* {id} = {assignment};", &expression.type_));
+                self.push(format!("{} {id} = {assignment};", &expression.type_));
             }
             ExpressionKind::LocalReference(referenced_id) => {
-                self.push(format!("{}* {id} = {referenced_id};", &expression.type_));
+                self.push(format!("{} {id} = {referenced_id};", &expression.type_));
             }
             ExpressionKind::CallFunction {
                 function,
                 arguments,
             } => {
-                self.push(format!("{}* {id} = {function}(", &expression.type_));
+                self.push(format!("{} {id} = {function}(", &expression.type_));
                 for (index, argument) in arguments.iter().enumerate() {
                     if index > 0 {
                         self.push(", ");
@@ -822,10 +828,10 @@ impl<'h> Context<'h> {
             }
             ExpressionKind::CallLambda { lambda, arguments } => {
                 self.push(format!(
-                    "{}* {id} = {lambda}->function({lambda}->closure",
+                    "{} {id} = {lambda}.function({lambda}.closure",
                     &expression.type_
                 ));
-                for argument in arguments.iter() {
+                for argument in &**arguments {
                     self.push(format!(", {argument}"));
                 }
                 self.push(");");
@@ -835,14 +841,19 @@ impl<'h> Context<'h> {
                 enum_,
                 cases,
             } => {
-                self.push(format!("{}* {id};\n", &expression.type_));
+                self.push(format!("{} {id};\n", &expression.type_));
 
-                self.push(format!("switch ({value}->variant) {{"));
-                for case in cases.iter() {
+                self.push(format!("switch ({value}.variant) {{"));
+                for case in &**cases {
                     self.push(format!("case {enum_}_{}:\n", case.variant));
                     if let Some((value_id, value_type)) = &case.value {
                         self.push(format!(
-                            "{value_type}* {value_id} = {value}->value.{};\n",
+                            "{value_type} {value_id} = {}{value}.value.{};\n",
+                            if self.get_boxed_variants(enum_).contains(&case.variant) {
+                                "*"
+                            } else {
+                                ""
+                            },
                             case.variant,
                         ));
                     }
@@ -866,12 +877,12 @@ impl<'h> Context<'h> {
                     ));
                 }
                 self.push(format!(
-                    "{type_}* {id} = malloc(sizeof({type_}));",
+                    "\
+                    {type_} {id} = {{
+                        .closure = {id}_closure,
+                        .function = {declaration_name}$lambda{id}_function,
+                    }};",
                     type_ = &expression.type_,
-                ));
-                self.push(format!("{id}->closure = {id}_closure;"));
-                self.push(format!(
-                    "{id}->function = {declaration_name}$lambda{id}_function;",
                 ));
             }
         }

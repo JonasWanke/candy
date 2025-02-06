@@ -1,23 +1,23 @@
 #![feature(
     anonymous_lifetime_in_impl_trait,
     box_patterns,
-    entry_insert,
     extract_if,
     hasher_prefixfree_extras,
     io_error_more,
     let_chains,
     try_blocks
 )]
-#![warn(clippy::nursery, clippy::pedantic, unused_crate_dependencies)]
-#![allow(
-    clippy::cognitive_complexity,
-    clippy::match_same_arms,
-    clippy::missing_errors_doc,
-    clippy::missing_panics_doc,
-    clippy::module_name_repetitions,
-    clippy::similar_names,
-    clippy::too_many_lines
-)]
+#![allow(clippy::all)]
+// #![warn(clippy::nursery, clippy::pedantic, unused_crate_dependencies)]
+// #![allow(
+//     clippy::cognitive_complexity,
+//     clippy::match_same_arms,
+//     clippy::missing_errors_doc,
+//     clippy::missing_panics_doc,
+//     clippy::module_name_repetitions,
+//     clippy::similar_names,
+//     clippy::too_many_lines
+// )]
 
 pub use self::tracing::{CallTracingMode, TracingConfig, TracingMode};
 

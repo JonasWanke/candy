@@ -1,5 +1,6 @@
 use derive_more::{Deref, DerefMut, From};
 use extension_trait::extension_trait;
+use serde::Serialize;
 use std::{
     fmt::{self, Display, Formatter},
     ops::Range,
@@ -41,7 +42,7 @@ pub impl RangeOfOffset for Range<Offset> {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 pub struct Position {
     /// Zero-based line index (`\n`-separated)
     pub line: usize,

@@ -1,21 +1,21 @@
 [workspace]
 resolver = "2"
 members = [
-    "compiler_v4",
-    "compiler/backend_inkwell",
-    "compiler/cli",
-    "compiler/formatter",
-    "compiler/formatter/fuzz",
-    "compiler/frontend",
-    "compiler/fuzzer",
-    "compiler/language_server",
-    "compiler/vm",
-    "compiler/vm/fuzz",
+  "compiler_v4",
+  "compiler/backend_inkwell",
+  "compiler/cli",
+  "compiler/formatter",
+  "compiler/formatter/fuzz",
+  "compiler/frontend",
+  "compiler/fuzzer",
+  "compiler/language_server",
+  "compiler/vm",
+  "compiler/vm/fuzz",
 ]
 
 [workspace.package]
 edition = "2021"
-rust-version = "1.78.0"
+rust-version = "1.82.0"
 
 [profile.release]
 # This adds file and line number information to backtraces while only increasing

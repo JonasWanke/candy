@@ -280,7 +280,7 @@ struct SolverTree {
     goal: SolverGoal,
 }
 impl SolverTree {
-    fn solve(&mut self, context: &mut Solver) -> SolverSolution {
+    fn solve(&self, context: &mut Solver) -> SolverSolution {
         let mut strands = context
             .rules
             .iter()
